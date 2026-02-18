@@ -12,19 +12,26 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
-	"github.com/labtiva/codemium/internal/analyzer"
-	"github.com/labtiva/codemium/internal/auth"
-	"github.com/labtiva/codemium/internal/model"
-	"github.com/labtiva/codemium/internal/output"
-	"github.com/labtiva/codemium/internal/provider"
-	"github.com/labtiva/codemium/internal/ui"
-	"github.com/labtiva/codemium/internal/worker"
+	"github.com/dsablic/codemium/internal/analyzer"
+	"github.com/dsablic/codemium/internal/auth"
+	"github.com/dsablic/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/output"
+	"github.com/dsablic/codemium/internal/provider"
+	"github.com/dsablic/codemium/internal/ui"
+	"github.com/dsablic/codemium/internal/worker"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 func main() {
 	root := &cobra.Command{
-		Use:   "codemium",
-		Short: "Generate code statistics across repositories",
+		Use:     "codemium",
+		Short:   "Generate code statistics across repositories",
+		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 	}
 
 	root.AddCommand(newAuthCmd())

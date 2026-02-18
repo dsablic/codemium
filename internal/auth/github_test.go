@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/labtiva/codemium/internal/auth"
+	"github.com/dsablic/codemium/internal/auth"
 )
 
 func TestGitHubDeviceFlow(t *testing.T) {

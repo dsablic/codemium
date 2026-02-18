@@ -4,7 +4,7 @@ package provider
 import (
 	"context"
 
-	"github.com/labtiva/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/model"
 )
 
 // ListOpts configures which repositories to retrieve from a provider.

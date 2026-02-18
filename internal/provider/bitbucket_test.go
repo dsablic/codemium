@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labtiva/codemium/internal/provider"
+	"github.com/dsablic/codemium/internal/provider"
 )
 
 func TestBitbucketListRepos(t *testing.T) {

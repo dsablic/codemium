@@ -4,7 +4,7 @@ package ui_test
 import (
 	"testing"
 
-	"github.com/labtiva/codemium/internal/ui"
+	"github.com/dsablic/codemium/internal/ui"
 )
 
 func TestPlainProgress(t *testing.T) {

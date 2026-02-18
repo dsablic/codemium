@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labtiva/codemium/internal/auth"
+	"github.com/dsablic/codemium/internal/auth"
 )
 
 func TestCredentialsRoundTrip(t *testing.T) {

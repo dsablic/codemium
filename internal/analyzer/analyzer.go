@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/boyter/scc/v3/processor"
-	"github.com/labtiva/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/model"
 )
 
 var initOnce sync.Once

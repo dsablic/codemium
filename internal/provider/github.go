@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/labtiva/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/model"
 )
 
 const githubAPIBase = "https://api.github.com"

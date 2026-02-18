@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labtiva/codemium/internal/model"
-	"github.com/labtiva/codemium/internal/output"
+	"github.com/dsablic/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/output"
 )
 
 func sampleReport() model.Report {

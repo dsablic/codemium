@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/labtiva/codemium/internal/analyzer"
+	"github.com/dsablic/codemium/internal/analyzer"
 )
 
 func TestAnalyzeDirectory(t *testing.T) {

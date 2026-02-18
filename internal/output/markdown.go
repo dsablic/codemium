@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/labtiva/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/model"
 )
 
 // WriteMarkdown writes the report as GitHub-flavored markdown to w.

@@ -5,7 +5,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/labtiva/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/model"
 )
 
 // Result holds the outcome of processing a single repository.

@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/labtiva/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/model"
 )
 
 const bitbucketAPIBase = "https://api.bitbucket.org"

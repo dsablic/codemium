@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/labtiva/codemium/internal/analyzer"
-	"github.com/labtiva/codemium/internal/model"
-	"github.com/labtiva/codemium/internal/worker"
+	"github.com/dsablic/codemium/internal/analyzer"
+	"github.com/dsablic/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/worker"
 )
 
 func TestAnalyzePipeline(t *testing.T) {

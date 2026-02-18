@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labtiva/codemium/internal/analyzer"
+	"github.com/dsablic/codemium/internal/analyzer"
 )
 
 func TestCloneAndCleanup(t *testing.T) {

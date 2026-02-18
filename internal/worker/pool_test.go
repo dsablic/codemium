@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/labtiva/codemium/internal/model"
-	"github.com/labtiva/codemium/internal/worker"
+	"github.com/dsablic/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/worker"
 )
 
 func TestPoolProcessesAllItems(t *testing.T) {

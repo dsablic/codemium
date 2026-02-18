@@ -1,4 +1,4 @@
-module github.com/labtiva/codemium
+module github.com/dsablic/codemium
 
 go 1.25.2
 

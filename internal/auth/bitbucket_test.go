@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labtiva/codemium/internal/auth"
+	"github.com/dsablic/codemium/internal/auth"
 )
 
 func TestBitbucketTokenExchange(t *testing.T) {

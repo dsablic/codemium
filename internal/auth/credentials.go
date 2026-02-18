@@ -16,6 +16,7 @@ type Credentials struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	Username     string    `json:"username,omitempty"`
 }
 
 func (c Credentials) Expired() bool {
@@ -78,7 +79,10 @@ func (s *FileStore) Load(provider string) (Credentials, error) {
 func (s *FileStore) LoadWithEnv(provider string) (Credentials, error) {
 	envKey := fmt.Sprintf("CODEMIUM_%s_TOKEN", toUpperSnake(provider))
 	if token := os.Getenv(envKey); token != "" {
-		return Credentials{AccessToken: token}, nil
+		cred := Credentials{AccessToken: token}
+		userKey := fmt.Sprintf("CODEMIUM_%s_USERNAME", toUpperSnake(provider))
+		cred.Username = os.Getenv(userKey)
+		return cred, nil
 	}
 	return s.Load(provider)
 }

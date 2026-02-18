@@ -18,7 +18,7 @@ func TestCloneAndCleanup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	cloner := analyzer.NewCloner("")
+	cloner := analyzer.NewCloner("", "")
 
 	// Clone a small public repo
 	dir, cleanup, err := cloner.Clone(ctx, "https://github.com/kelseyhightower/nocode.git")

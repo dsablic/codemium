@@ -61,6 +61,46 @@ func TestCredentialsEnvOverride(t *testing.T) {
 	}
 }
 
+func TestCredentialsEnvOverrideWithUsername(t *testing.T) {
+	dir := t.TempDir()
+	store := auth.NewFileStore(filepath.Join(dir, "credentials.json"))
+
+	t.Setenv("CODEMIUM_BITBUCKET_TOKEN", "app-pass")
+	t.Setenv("CODEMIUM_BITBUCKET_USERNAME", "myuser")
+
+	cred, err := store.LoadWithEnv("bitbucket")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cred.AccessToken != "app-pass" {
+		t.Errorf("expected app-pass, got %s", cred.AccessToken)
+	}
+	if cred.Username != "myuser" {
+		t.Errorf("expected myuser, got %s", cred.Username)
+	}
+}
+
+func TestCredentialsUsernameRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	store := auth.NewFileStore(filepath.Join(dir, "credentials.json"))
+
+	cred := auth.Credentials{
+		AccessToken: "app-pass",
+		Username:    "myuser",
+	}
+	if err := store.Save("bitbucket", cred); err != nil {
+		t.Fatalf("failed to save: %v", err)
+	}
+
+	loaded, err := store.Load("bitbucket")
+	if err != nil {
+		t.Fatalf("failed to load: %v", err)
+	}
+	if loaded.Username != "myuser" {
+		t.Errorf("expected myuser, got %s", loaded.Username)
+	}
+}
+
 func TestCredentialsFilePermissions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.json")

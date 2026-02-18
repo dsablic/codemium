@@ -31,28 +31,24 @@ go install github.com/dsablic/codemium/cmd/codemium@latest
 
 ## Authentication
 
-Codemium supports browser-based OAuth and environment variable tokens.
+Codemium supports interactive API token login and environment variable tokens.
 
 ### Bitbucket
 
-**Option 1: OAuth (interactive)**
+**Option 1: API token (interactive)**
 
-1. Create an OAuth consumer in your Bitbucket workspace settings with callback URL `http://localhost:<any-port>/callback`
-2. Set environment variables:
-   ```bash
-   export CODEMIUM_BITBUCKET_CLIENT_ID=your_client_id
-   export CODEMIUM_BITBUCKET_CLIENT_SECRET=your_client_secret
-   ```
-3. Run:
+1. Create a scoped API token at https://id.atlassian.com/manage-profile/security/api-tokens — click **"Create API token with scopes"**, select **Bitbucket** as the app, and enable **Repository Read**
+2. Run:
    ```bash
    codemium auth login --provider bitbucket
    ```
-   This opens your browser for authorization. Tokens are stored at `~/.config/codemium/credentials.json` and refreshed automatically.
+   This prompts for your Atlassian email and API token. Credentials are verified against the Bitbucket API and stored at `~/.config/codemium/credentials.json`.
 
 **Option 2: Environment variable (CI/CD)**
 
 ```bash
-export CODEMIUM_BITBUCKET_TOKEN=your_app_password_or_token
+export CODEMIUM_BITBUCKET_USERNAME=your_email
+export CODEMIUM_BITBUCKET_TOKEN=your_api_token
 ```
 
 ### GitHub

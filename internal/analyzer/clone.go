@@ -12,13 +12,16 @@ import (
 
 // Cloner performs shallow git clones into temporary directories.
 type Cloner struct {
-	token string
+	token    string
+	username string
 }
 
 // NewCloner creates a Cloner. If token is non-empty it will be used for
-// HTTP basic-auth (username "x-token-auth" works for GitHub and Bitbucket).
-func NewCloner(token string) *Cloner {
-	return &Cloner{token: token}
+// HTTP basic-auth. If username is empty, "x-token-auth" is used (works
+// for OAuth tokens on GitHub and Bitbucket). For Bitbucket App Passwords,
+// pass the actual Bitbucket username.
+func NewCloner(token, username string) *Cloner {
+	return &Cloner{token: token, username: username}
 }
 
 // Clone shallow-clones the repository at cloneURL into a temporary directory.
@@ -42,8 +45,12 @@ func (c *Cloner) Clone(ctx context.Context, cloneURL string) (dir string, cleanu
 	}
 
 	if c.token != "" {
+		username := c.username
+		if username == "" {
+			username = "x-token-auth"
+		}
 		opts.Auth = &http.BasicAuth{
-			Username: "x-token-auth",
+			Username: username,
 			Password: c.token,
 		}
 	}

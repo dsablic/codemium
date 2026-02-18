@@ -56,7 +56,7 @@ func TestBitbucketListRepos(t *testing.T) {
 	}))
 	defer server.Close()
 
-	bb := provider.NewBitbucket("test-token", server.URL)
+	bb := provider.NewBitbucket("test-token", "", server.URL)
 	repos, err := bb.ListRepos(context.Background(), provider.ListOpts{
 		Workspace: "myworkspace",
 	})
@@ -85,7 +85,7 @@ func TestBitbucketFilterByProject(t *testing.T) {
 	}))
 	defer server.Close()
 
-	bb := provider.NewBitbucket("test-token", server.URL)
+	bb := provider.NewBitbucket("test-token", "", server.URL)
 	bb.ListRepos(context.Background(), provider.ListOpts{
 		Workspace: "myworkspace",
 		Projects:  []string{"PROJ1", "PROJ2"},
@@ -93,6 +93,29 @@ func TestBitbucketFilterByProject(t *testing.T) {
 
 	if receivedQuery == "" {
 		t.Fatal("expected query parameter to be set")
+	}
+}
+
+func TestBitbucketBasicAuth(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(map[string]any{"values": []map[string]any{}})
+	}))
+	defer server.Close()
+
+	bb := provider.NewBitbucket("app-pass", "myuser", server.URL)
+	bb.ListRepos(context.Background(), provider.ListOpts{Workspace: "ws"})
+
+	if gotAuth == "" {
+		t.Fatal("expected Authorization header")
+	}
+	if gotAuth == "Bearer app-pass" {
+		t.Error("expected Basic auth, got Bearer")
+	}
+	// Basic auth header should start with "Basic "
+	if len(gotAuth) < 6 || gotAuth[:6] != "Basic " {
+		t.Errorf("expected Basic auth header, got %s", gotAuth)
 	}
 }
 
@@ -125,7 +148,7 @@ func TestBitbucketExcludeForks(t *testing.T) {
 	}))
 	defer server.Close()
 
-	bb := provider.NewBitbucket("test-token", server.URL)
+	bb := provider.NewBitbucket("test-token", "", server.URL)
 
 	repos, _ := bb.ListRepos(context.Background(), provider.ListOpts{
 		Workspace:    "ws",

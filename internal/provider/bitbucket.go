@@ -105,6 +105,9 @@ type bitbucketRepo struct {
 	Project  struct {
 		Key string `json:"key"`
 	} `json:"project"`
+	MainBranch *struct {
+		Name string `json:"name"`
+	} `json:"mainbranch"`
 	Links struct {
 		HTML struct {
 			Href string `json:"href"`
@@ -163,14 +166,24 @@ func (b *Bitbucket) fetchPage(ctx context.Context, pageURL string) ([]model.Repo
 			}
 		}
 
+		branch := "main"
+		if bbRepo.MainBranch != nil && bbRepo.MainBranch.Name != "" {
+			branch = bbRepo.MainBranch.Name
+		}
+
+		downloadURL := fmt.Sprintf("https://bitbucket.org/%s/get/%s.tar.gz",
+			bbRepo.FullName, url.PathEscape(branch))
+
 		repos = append(repos, model.Repo{
-			Name:     bbRepo.Slug,
-			Slug:     bbRepo.Slug,
-			Project:  bbRepo.Project.Key,
-			URL:      bbRepo.Links.HTML.Href,
-			CloneURL: cloneURL,
-			Provider: "bitbucket",
-			Fork:     bbRepo.Parent != nil,
+			Name:          bbRepo.Slug,
+			Slug:          bbRepo.Slug,
+			Project:       bbRepo.Project.Key,
+			URL:           bbRepo.Links.HTML.Href,
+			CloneURL:      cloneURL,
+			DownloadURL:   downloadURL,
+			Provider:      "bitbucket",
+			DefaultBranch: branch,
+			Fork:          bbRepo.Parent != nil,
 		})
 	}
 
@@ -194,6 +207,10 @@ func (b *Bitbucket) ListProjects(ctx context.Context, workspace string) ([]Proje
 			return nil, fmt.Errorf("bitbucket projects request: %w", err)
 		}
 
+		if resp.StatusCode == http.StatusForbidden {
+			resp.Body.Close()
+			return nil, fmt.Errorf("bitbucket projects API returned 403 — add read:project:bitbucket scope to your API token")
+		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
 			return nil, fmt.Errorf("bitbucket projects API returned status %d", resp.StatusCode)

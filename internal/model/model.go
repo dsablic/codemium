@@ -3,14 +3,16 @@ package model
 
 // Repo represents a repository from a provider.
 type Repo struct {
-	Name     string
-	Slug     string
-	Project  string
-	URL      string
-	CloneURL string
-	Provider string
-	Archived bool
-	Fork     bool
+	Name          string
+	Slug          string
+	Project       string
+	URL           string
+	CloneURL      string
+	DownloadURL   string // tarball download URL (used when git clone isn't available)
+	Provider      string
+	DefaultBranch string
+	Archived      bool
+	Fork          bool
 }
 
 // LanguageStats holds code statistics for a single language.

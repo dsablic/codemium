@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,6 +41,7 @@ func main() {
 
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newAnalyzeCmd())
+	root.AddCommand(newMarkdownCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -113,7 +115,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 func loginBitbucketAPIToken() (auth.Credentials, error) {
 	fmt.Fprintln(os.Stderr, "Bitbucket API token login")
 	fmt.Fprintln(os.Stderr, "Create a scoped token at: https://id.atlassian.com/manage-profile/security/api-tokens")
-	fmt.Fprintln(os.Stderr, "  -> 'Create API token with scopes' -> Bitbucket -> Repository Read")
+	fmt.Fprintln(os.Stderr, "  -> 'Create API token with scopes' -> Bitbucket -> Repository Read, Project Read")
 	fmt.Fprintln(os.Stderr)
 
 	reader := bufio.NewReader(os.Stdin)
@@ -182,7 +184,6 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().Bool("include-forks", false, "Include forked repos")
 	cmd.Flags().Int("concurrency", 5, "Number of parallel workers")
 	cmd.Flags().String("output", "", "Write JSON to file (default: stdout)")
-	cmd.Flags().String("markdown", "", "Write markdown summary to file")
 
 	cmd.MarkFlagRequired("provider")
 
@@ -203,7 +204,6 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	includeForks, _ := cmd.Flags().GetBool("include-forks")
 	concurrency, _ := cmd.Flags().GetInt("concurrency")
 	outputPath, _ := cmd.Flags().GetString("output")
-	markdownPath, _ := cmd.Flags().GetString("markdown")
 
 	// Load credentials
 	store := auth.NewFileStore(auth.DefaultStorePath())
@@ -308,7 +308,14 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	}
 
 	results := worker.RunWithProgress(ctx, repoList, concurrency, func(ctx context.Context, repo model.Repo) (*model.RepoStats, error) {
-		dir, cleanup, err := cloner.Clone(ctx, repo.CloneURL)
+		var dir string
+		var cleanup func()
+		var err error
+		if repo.DownloadURL != "" {
+			dir, cleanup, err = cloner.Download(ctx, repo.DownloadURL)
+		} else {
+			dir, cleanup, err = cloner.Clone(ctx, repo.CloneURL)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -350,20 +357,36 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write JSON: %w", err)
 	}
 
-	// Write markdown if requested
-	if markdownPath != "" {
-		f, err := os.Create(markdownPath)
+	return nil
+}
+
+func newMarkdownCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "markdown [file]",
+		Short: "Convert JSON report to markdown",
+		Long:  "Reads a JSON report from a file argument or stdin and writes markdown to stdout.",
+		Args:  cobra.MaximumNArgs(1),
+		RunE:  runMarkdown,
+	}
+}
+
+func runMarkdown(cmd *cobra.Command, args []string) error {
+	var r io.Reader = os.Stdin
+	if len(args) == 1 {
+		f, err := os.Open(args[0])
 		if err != nil {
-			return fmt.Errorf("create markdown file: %w", err)
+			return fmt.Errorf("open file: %w", err)
 		}
 		defer f.Close()
-		if err := output.WriteMarkdown(f, report); err != nil {
-			return fmt.Errorf("write markdown: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Markdown summary written to %s\n", markdownPath)
+		r = f
 	}
 
-	return nil
+	var report model.Report
+	if err := json.NewDecoder(r).Decode(&report); err != nil {
+		return fmt.Errorf("parse JSON report: %w", err)
+	}
+
+	return output.WriteMarkdown(os.Stdout, report)
 }
 
 func buildReport(providerName, workspace, org string, projects, repos, exclude []string, results []worker.Result) model.Report {

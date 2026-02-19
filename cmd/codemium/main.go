@@ -385,8 +385,19 @@ func runMarkdown(cmd *cobra.Command, args []string) error {
 		r = f
 	}
 
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("read input: %w", err)
+	}
+
+	// Auto-detect report type: try TrendsReport first
+	var trends model.TrendsReport
+	if err := json.Unmarshal(data, &trends); err == nil && len(trends.Snapshots) > 0 {
+		return output.WriteTrendsMarkdown(os.Stdout, trends)
+	}
+
 	var report model.Report
-	if err := json.NewDecoder(r).Decode(&report); err != nil {
+	if err := json.Unmarshal(data, &report); err != nil {
 		return fmt.Errorf("parse JSON report: %w", err)
 	}
 

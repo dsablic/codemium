@@ -19,6 +19,7 @@ import (
 
 	"github.com/dsablic/codemium/internal/analyzer"
 	"github.com/dsablic/codemium/internal/auth"
+	"github.com/dsablic/codemium/internal/history"
 	"github.com/dsablic/codemium/internal/model"
 	"github.com/dsablic/codemium/internal/output"
 	"github.com/dsablic/codemium/internal/provider"
@@ -42,6 +43,7 @@ func main() {
 	root.AddCommand(newAuthCmd())
 	root.AddCommand(newAnalyzeCmd())
 	root.AddCommand(newMarkdownCmd())
+	root.AddCommand(newTrendsCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -460,6 +462,272 @@ func buildReport(providerName, workspace, org string, projects, repos, exclude [
 	sort.Slice(report.ByLanguage, func(i, j int) bool {
 		return report.ByLanguage[i].Code > report.ByLanguage[j].Code
 	})
+
+	return report
+}
+
+func newTrendsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "trends",
+		Short: "Analyze repository trends over time using git history",
+		RunE:  runTrends,
+	}
+
+	cmd.Flags().String("provider", "", "Provider (bitbucket, github)")
+	cmd.Flags().String("workspace", "", "Bitbucket workspace slug")
+	cmd.Flags().String("org", "", "GitHub organization")
+	cmd.Flags().String("since", "", "Start period (YYYY-MM for monthly, YYYY-MM-DD for weekly)")
+	cmd.Flags().String("until", "", "End period (YYYY-MM for monthly, YYYY-MM-DD for weekly)")
+	cmd.Flags().String("interval", "monthly", "Interval: monthly or weekly")
+	cmd.Flags().StringSlice("repos", nil, "Filter to specific repo names")
+	cmd.Flags().StringSlice("exclude", nil, "Exclude specific repos")
+	cmd.Flags().Bool("include-archived", false, "Include archived repos")
+	cmd.Flags().Bool("include-forks", false, "Include forked repos")
+	cmd.Flags().Int("concurrency", 5, "Number of parallel workers")
+	cmd.Flags().String("output", "", "Write JSON to file (default: stdout)")
+
+	cmd.MarkFlagRequired("provider")
+	cmd.MarkFlagRequired("since")
+	cmd.MarkFlagRequired("until")
+
+	return cmd
+}
+
+func runTrends(cmd *cobra.Command, args []string) error {
+	ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt)
+	defer cancel()
+
+	providerName, _ := cmd.Flags().GetString("provider")
+	workspace, _ := cmd.Flags().GetString("workspace")
+	org, _ := cmd.Flags().GetString("org")
+	since, _ := cmd.Flags().GetString("since")
+	until, _ := cmd.Flags().GetString("until")
+	interval, _ := cmd.Flags().GetString("interval")
+	repos, _ := cmd.Flags().GetStringSlice("repos")
+	exclude, _ := cmd.Flags().GetStringSlice("exclude")
+	includeArchived, _ := cmd.Flags().GetBool("include-archived")
+	includeForks, _ := cmd.Flags().GetBool("include-forks")
+	concurrency, _ := cmd.Flags().GetInt("concurrency")
+	outputPath, _ := cmd.Flags().GetString("output")
+
+	if interval != "monthly" && interval != "weekly" {
+		return fmt.Errorf("--interval must be 'monthly' or 'weekly'")
+	}
+
+	store := auth.NewFileStore(auth.DefaultStorePath())
+	cred, err := store.LoadWithEnv(providerName)
+	if err != nil {
+		return fmt.Errorf("not authenticated with %s — run 'codemium auth login --provider %s' first", providerName, providerName)
+	}
+
+	if cred.Expired() && cred.RefreshToken != "" {
+		clientID := os.Getenv("CODEMIUM_BITBUCKET_CLIENT_ID")
+		clientSecret := os.Getenv("CODEMIUM_BITBUCKET_CLIENT_SECRET")
+		bb := &auth.BitbucketOAuth{ClientID: clientID, ClientSecret: clientSecret}
+		cred, err = bb.RefreshToken(ctx, cred.RefreshToken)
+		if err != nil {
+			return fmt.Errorf("token refresh failed: %w", err)
+		}
+		store.Save(providerName, cred)
+	}
+
+	var prov provider.Provider
+	switch providerName {
+	case "bitbucket":
+		if workspace == "" {
+			return fmt.Errorf("--workspace is required for bitbucket")
+		}
+		prov = provider.NewBitbucket(cred.AccessToken, cred.Username, "")
+	case "github":
+		if org == "" {
+			return fmt.Errorf("--org is required for github")
+		}
+		prov = provider.NewGitHub(cred.AccessToken, "")
+	default:
+		return fmt.Errorf("unsupported provider: %s", providerName)
+	}
+
+	fmt.Fprintln(os.Stderr, "Listing repositories...")
+	repoList, err := prov.ListRepos(ctx, provider.ListOpts{
+		Workspace:       workspace,
+		Organization:    org,
+		Repos:           repos,
+		Exclude:         exclude,
+		IncludeArchived: includeArchived,
+		IncludeForks:    includeForks,
+	})
+	if err != nil {
+		return fmt.Errorf("list repos: %w", err)
+	}
+	if len(repoList) == 0 {
+		return fmt.Errorf("no repositories found")
+	}
+
+	dates := history.GenerateDates(since, until, interval)
+	if len(dates) == 0 {
+		return fmt.Errorf("no periods generated for --since %s --until %s --interval %s", since, until, interval)
+	}
+
+	periods := make([]string, len(dates))
+	for i, d := range dates {
+		periods[i] = history.FormatPeriod(d, interval)
+	}
+
+	fmt.Fprintf(os.Stderr, "Found %d repositories, analyzing %d %s periods\n", len(repoList), len(dates), interval)
+
+	useTUI := ui.IsTTY()
+	var program *tea.Program
+	if useTUI {
+		program = ui.RunTUI(len(repoList))
+		go func() { program.Run() }()
+	}
+
+	cloner := analyzer.NewCloner(cred.AccessToken, cred.Username)
+	codeAnalyzer := analyzer.New()
+
+	progressFn := func(completed, total int, repo model.Repo) {
+		if useTUI && program != nil {
+			program.Send(ui.ProgressMsg{
+				Completed: completed,
+				Total:     total,
+				RepoName:  repo.Slug,
+			})
+		} else {
+			fmt.Fprintf(os.Stderr, "[%d/%d] Analyzed %s\n", completed, total, repo.Slug)
+		}
+	}
+
+	results := worker.RunTrends(ctx, repoList, concurrency, func(ctx context.Context, repo model.Repo) (map[string]*model.RepoStats, error) {
+		gitRepo, dir, cleanup, err := cloner.CloneFull(ctx, repo.CloneURL)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+
+		commitMap, err := history.FindCommits(gitRepo, dates)
+		if err != nil {
+			return nil, fmt.Errorf("find commits: %w", err)
+		}
+
+		snapshots := make(map[string]*model.RepoStats, len(dates))
+		for i, date := range dates {
+			hash, ok := commitMap[date]
+			if !ok {
+				continue
+			}
+
+			if err := analyzer.Checkout(gitRepo, dir, hash); err != nil {
+				continue
+			}
+
+			stats, err := codeAnalyzer.Analyze(ctx, dir)
+			if err != nil {
+				continue
+			}
+
+			stats.Repository = repo.Slug
+			stats.Project = repo.Project
+			stats.Provider = repo.Provider
+			stats.URL = repo.URL
+			snapshots[periods[i]] = stats
+		}
+
+		return snapshots, nil
+	}, progressFn)
+
+	if useTUI && program != nil {
+		program.Send(ui.DoneMsg{})
+		time.Sleep(100 * time.Millisecond)
+		program.Quit()
+	}
+
+	report := buildTrendsReport(providerName, workspace, org, since, until, interval, periods, repos, exclude, results)
+
+	var jsonWriter io.Writer = os.Stdout
+	if outputPath != "" {
+		f, err := os.Create(outputPath)
+		if err != nil {
+			return fmt.Errorf("create output file: %w", err)
+		}
+		defer f.Close()
+		jsonWriter = f
+	}
+
+	return output.WriteTrendsJSON(jsonWriter, report)
+}
+
+func buildTrendsReport(providerName, workspace, org, since, until, interval string, periods, repos, exclude []string, results []worker.TrendsResult) model.TrendsReport {
+	report := model.TrendsReport{
+		GeneratedAt:  time.Now().UTC().Format(time.RFC3339),
+		Provider:     providerName,
+		Workspace:    workspace,
+		Organization: org,
+		Filters: model.Filters{
+			Repos:   repos,
+			Exclude: exclude,
+		},
+		Since:    since,
+		Until:    until,
+		Interval: interval,
+		Periods:  periods,
+	}
+
+	snapshotMap := make(map[string]*model.PeriodSnapshot, len(periods))
+	for _, p := range periods {
+		snapshotMap[p] = &model.PeriodSnapshot{Period: p}
+	}
+
+	for _, r := range results {
+		if r.Err != nil {
+			report.Errors = append(report.Errors, model.RepoError{
+				Repository: r.Repo.Slug,
+				Error:      r.Err.Error(),
+			})
+			continue
+		}
+
+		for period, stats := range r.Snapshots {
+			snap := snapshotMap[period]
+			snap.Repositories = append(snap.Repositories, *stats)
+			snap.Totals.Repos++
+			snap.Totals.Files += stats.Totals.Files
+			snap.Totals.Lines += stats.Totals.Lines
+			snap.Totals.Code += stats.Totals.Code
+			snap.Totals.Comments += stats.Totals.Comments
+			snap.Totals.Blanks += stats.Totals.Blanks
+			snap.Totals.Complexity += stats.Totals.Complexity
+
+			langMap := map[string]*model.LanguageStats{}
+			for _, existing := range snap.ByLanguage {
+				copy := existing
+				langMap[existing.Name] = &copy
+			}
+			for _, lang := range stats.Languages {
+				lt, ok := langMap[lang.Name]
+				if !ok {
+					lt = &model.LanguageStats{Name: lang.Name}
+					langMap[lang.Name] = lt
+				}
+				lt.Files += lang.Files
+				lt.Lines += lang.Lines
+				lt.Code += lang.Code
+				lt.Comments += lang.Comments
+				lt.Blanks += lang.Blanks
+				lt.Complexity += lang.Complexity
+			}
+			snap.ByLanguage = nil
+			for _, lt := range langMap {
+				snap.ByLanguage = append(snap.ByLanguage, *lt)
+			}
+			sort.Slice(snap.ByLanguage, func(i, j int) bool {
+				return snap.ByLanguage[i].Code > snap.ByLanguage[j].Code
+			})
+		}
+	}
+
+	for _, p := range periods {
+		report.Snapshots = append(report.Snapshots, *snapshotMap[p])
+	}
 
 	return report
 }

@@ -60,6 +60,29 @@ type Filters struct {
 	Exclude  []string `json:"exclude,omitempty"`
 }
 
+// PeriodSnapshot holds stats for all repos at a single point in time.
+type PeriodSnapshot struct {
+	Period       string          `json:"period"`
+	Repositories []RepoStats     `json:"repositories"`
+	Totals       Stats           `json:"totals"`
+	ByLanguage   []LanguageStats `json:"by_language"`
+}
+
+// TrendsReport is the top-level output for historical trends.
+type TrendsReport struct {
+	GeneratedAt  string           `json:"generated_at"`
+	Provider     string           `json:"provider"`
+	Workspace    string           `json:"workspace,omitempty"`
+	Organization string           `json:"organization,omitempty"`
+	Filters      Filters          `json:"filters"`
+	Since        string           `json:"since"`
+	Until        string           `json:"until"`
+	Interval     string           `json:"interval"`
+	Periods      []string         `json:"periods"`
+	Snapshots    []PeriodSnapshot `json:"snapshots"`
+	Errors       []RepoError      `json:"errors,omitempty"`
+}
+
 // Report is the top-level output structure.
 type Report struct {
 	GeneratedAt  string          `json:"generated_at"`

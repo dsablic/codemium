@@ -181,6 +181,26 @@ codemium markdown --narrative trends.json
 
 Requires one of: [Claude Code](https://claude.com/claude-code), [Codex CLI](https://github.com/openai/codex), or [Gemini CLI](https://github.com/google-gemini/gemini-cli) installed and authenticated.
 
+**Providing context for better narratives:** The AI generates richer analysis when given domain context about your organization. Use `--ai-prompt` or `--ai-prompt-file` to describe project areas, team structure, or what specific repos contain:
+
+```bash
+# Inline context
+codemium markdown --narrative --ai-prompt 'Project codes map to these areas:
+- SVC = Backend Services
+- WEB = Customer-Facing Web Apps
+- MOB = Mobile Apps (iOS & Android)
+- PLAT = Platform & Infrastructure
+- SDK = Public SDKs and Client Libraries
+
+The SVC repos include both microservices and shared libraries.
+The PLAT team also maintains CI/CD pipelines.' report.json
+
+# Or load from a file for longer descriptions
+codemium markdown --narrative --ai-prompt-file org-context.txt report.json
+```
+
+This is especially useful when Bitbucket project codes or repo naming conventions aren't self-explanatory — the AI will use your descriptions to assign human-readable names and provide more insightful analysis.
+
 ### Additional flags
 
 ```bash

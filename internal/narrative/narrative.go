@@ -1,4 +1,3 @@
-// internal/narrative/narrative.go
 package narrative
 
 import (
@@ -41,10 +40,13 @@ func DetectCLIWith(lookup LookupFunc) (string, error) {
 
 // BuildArgs returns the command name and argument slice for a non-interactive
 // invocation of the given CLI with the provided prompt.
+// For codex, the prompt is not passed as an argument — it is piped via stdin
+// (using "-" to read from stdin) because codex exec ignores stdin when a
+// prompt argument is present.
 func BuildArgs(cli, prompt string) (string, []string) {
 	switch cli {
 	case "codex":
-		return "codex", []string{"exec", prompt}
+		return "codex", []string{"exec", "-"}
 	case "gemini":
 		return "gemini", []string{"-p", prompt}
 	default: // "claude" and fallback
@@ -52,42 +54,41 @@ func BuildArgs(cli, prompt string) (string, []string) {
 	}
 }
 
-// DefaultPrompt returns a built-in prompt that instructs an AI CLI to generate
-// a narrative markdown report from a JSON code-statistics report on stdin.
+// DefaultPrompt returns the built-in prompt for the given report type.
+// reportType should be "standard" or "trends".
 // If extra is non-empty it is appended as additional instructions.
-func DefaultPrompt(extra string) string {
+func DefaultPrompt(reportType, extra string) string {
 	var b strings.Builder
 
-	b.WriteString(`You are a technical writer. You will receive a JSON report on stdin containing code statistics for a set of repositories.
+	b.WriteString(`You are enhancing a code statistics report with narrative analysis. You will receive a pre-computed markdown report via stdin. The report contains accurate tables with all metrics already calculated. There is a {{NARRATIVE}} placeholder where your narrative paragraphs should go.
 
-The JSON has one of two shapes:
-1. **Standard report** — top-level key "repositories" with an array of per-repo stats, plus "totals" and "by_language".
-2. **Trends report** — top-level key "snapshots" with an array of period snapshots, each containing "repositories", "totals", and "by_language".
+Write 2-3 paragraphs to replace the {{NARRATIVE}} placeholder. Output ONLY the paragraph text — no headings, no code fences, no preamble like "Here is the analysis:".
 
-Analyze the data and produce a polished Markdown document. Output ONLY pure Markdown — no code fences wrapping the entire output, no preamble, no commentary outside the document.
+`)
 
-Format all numbers with comma separators (e.g. 1,234,567). Compute derived metrics where useful, such as comment-to-code ratio (comments / code, as a percentage).
+	if reportType == "trends" {
+		b.WriteString(`Your analysis should:
+- Analyze the overall growth or decline trajectory across all periods
+- Identify the fastest-growing and shrinking repositories or languages
+- Note any inflection points or significant changes between periods
+- Comment on what the trends suggest about development priorities
+`)
+	} else {
+		b.WriteString(`Your analysis should:
+- Summarize the overall scope and architecture of the codebase
+- If repos are grouped by product area, describe what each area appears to cover based on the repository names within it, and assign descriptive human-readable names (e.g., "Backend Services" instead of "BAC")
+- Identify outliers: very large repos that skew totals, repos with unusual comment ratios, or unusually high complexity
+- Note what the language distribution reveals about the tech stack
+- Call out interesting patterns across product areas (e.g., which groups have the highest complexity, lowest comment ratios, or the most repos)
+`)
+	}
 
-### For a standard report
-
-1. **Title**: "# Code Statistics Report"
-2. **Summary** (## Summary): 2–3 paragraphs giving a high-level overview. Group repositories by project or naming patterns. Identify outliers (largest/smallest repos, highest complexity). Note language distribution across the organization.
-3. **Summary by Product Area** (## Summary by Product Area): A table grouping repos by their "project" field (or inferred grouping). Columns: Area, Repos, Files, Code, Comments, Comment %, Complexity.
-4. **Top 10 Repositories** (## Top 10 Repositories): Table of the 10 largest repos by code lines. Columns: Rank, Repository, Code, Comments, Comment %, Files, Complexity.
-5. **Per-Area Sections** (## <Area Name>): For each product area, a section with a table listing every repo in that area. Columns: Repository, Code, Comments, Comment %, Files, Top Language.
-
-### For a trends report
-
-1. **Title**: "# Code Statistics Trends"
-2. **Overview** (## Overview): Summarize overall growth or decline in code, files, and complexity across all periods.
-3. **Growth Analysis** (## Growth Analysis): Identify the fastest-growing repositories and languages. Note any inflection points or trend reversals.
-4. **Summary Table** (## Period Summary): Table with one row per period. Columns: Period, Repos, Files, Code, Comments, Complexity, Delta Code, Delta %.
-5. **Language Trends** (## Language Trends): Table showing how the top languages changed over time.
-6. **Notable Changes** (## Notable Changes): Bullet list of the most significant changes between periods.
+	b.WriteString(`
+Use **bold** for emphasis on key metrics and product area names. Reference specific repos by name with backtick formatting (e.g., ` + "`repo-name`" + `).
 `)
 
 	if extra != "" {
-		b.WriteString("\n### Additional Instructions\n\n")
+		b.WriteString("\nAdditional instructions:\n\n")
 		b.WriteString(extra)
 		b.WriteString("\n")
 	}
@@ -95,12 +96,35 @@ Format all numbers with comma separators (e.g. 1,234,567). Compute derived metri
 	return b.String()
 }
 
-// Generate runs the specified AI CLI, pipes jsonData to its stdin, and returns
-// the generated narrative markdown from stdout.
-func Generate(ctx context.Context, cli string, jsonData []byte, prompt string) (string, error) {
+// buildStdin constructs the stdin payload for the given CLI.
+// For codex, the prompt and data are combined into stdin because codex exec
+// reads the prompt from stdin (via "-") rather than as an argument.
+// For claude and gemini, only the document is piped (prompt goes via -p flag).
+func buildStdin(cli string, document []byte, prompt string) *bytes.Reader {
+	if cli == "codex" {
+		var buf bytes.Buffer
+		buf.WriteString(prompt)
+		buf.WriteString("\n\nHere is the pre-computed markdown report:\n\n")
+		buf.Write(document)
+		return bytes.NewReader(buf.Bytes())
+	}
+	return bytes.NewReader(document)
+}
+
+// Generate pre-processes the JSON data into a complete markdown document with
+// tables and computed metrics, then runs the AI CLI to generate narrative
+// paragraphs which are inserted into the document at the {{NARRATIVE}} placeholder.
+func Generate(ctx context.Context, cli string, jsonData []byte, extraInstructions string) (string, error) {
+	doc, reportType, err := PrepareDocument(jsonData)
+	if err != nil {
+		return "", fmt.Errorf("prepare document: %w", err)
+	}
+
+	prompt := DefaultPrompt(reportType, extraInstructions)
+
 	name, args := BuildArgs(cli, prompt)
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Stdin = bytes.NewReader(jsonData)
+	cmd.Stdin = buildStdin(cli, []byte(doc), prompt)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -114,5 +138,7 @@ func Generate(ctx context.Context, cli string, jsonData []byte, prompt string) (
 		return "", fmt.Errorf("%s failed: %w", cli, err)
 	}
 
-	return stdout.String(), nil
+	narrativeText := strings.TrimSpace(stdout.String())
+	result := strings.Replace(doc, narrativePlaceholder, narrativeText, 1)
+	return result, nil
 }

@@ -446,10 +446,8 @@ func runNarrative(cmd *cobra.Command, data []byte) error {
 		fmt.Fprintf(os.Stderr, "Using %s for narrative generation\n", aiCLI)
 	}
 
-	prompt := narrative.DefaultPrompt(aiPrompt)
-
 	ctx := cmd.Context()
-	result, err := narrative.Generate(ctx, aiCLI, data, prompt)
+	result, err := narrative.Generate(ctx, aiCLI, data, aiPrompt)
 	if err != nil {
 		return fmt.Errorf("narrative generation: %w", err)
 	}

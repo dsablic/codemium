@@ -1,4 +1,3 @@
-// internal/narrative/narrative_test.go
 package narrative_test
 
 import (
@@ -85,7 +84,7 @@ func TestBuildArgs(t *testing.T) {
 			cli:      "codex",
 			prompt:   "analyze this",
 			wantName: "codex",
-			wantArgs: []string{"exec", "analyze this"},
+			wantArgs: []string{"exec", "-"},
 		},
 		{
 			cli:      "gemini",
@@ -113,24 +112,34 @@ func TestBuildArgs(t *testing.T) {
 	}
 }
 
-func TestDefaultPromptContainsInstructions(t *testing.T) {
-	prompt := narrative.DefaultPrompt("")
+func TestDefaultPromptStandard(t *testing.T) {
+	prompt := narrative.DefaultPrompt("standard", "")
 
-	for _, keyword := range []string{"Markdown", "JSON"} {
+	for _, keyword := range []string{"narrative", "{{NARRATIVE}}", "scope", "outlier"} {
 		if !strings.Contains(strings.ToLower(prompt), strings.ToLower(keyword)) {
-			t.Errorf("DefaultPrompt should mention %q", keyword)
+			t.Errorf("standard prompt should mention %q", keyword)
+		}
+	}
+}
+
+func TestDefaultPromptTrends(t *testing.T) {
+	prompt := narrative.DefaultPrompt("trends", "")
+
+	for _, keyword := range []string{"narrative", "{{NARRATIVE}}", "growth", "decline"} {
+		if !strings.Contains(strings.ToLower(prompt), strings.ToLower(keyword)) {
+			t.Errorf("trends prompt should mention %q", keyword)
 		}
 	}
 }
 
 func TestDefaultPromptAppendsCustom(t *testing.T) {
 	custom := "Focus on security-related repositories only."
-	prompt := narrative.DefaultPrompt(custom)
+	prompt := narrative.DefaultPrompt("standard", custom)
 
 	if !strings.Contains(prompt, custom) {
 		t.Error("DefaultPrompt should contain the custom additional instructions")
 	}
-	if !strings.Contains(prompt, "Additional Instructions") {
-		t.Error("DefaultPrompt should contain 'Additional Instructions' header")
+	if !strings.Contains(prompt, "Additional instructions") {
+		t.Error("DefaultPrompt should contain 'Additional instructions' header")
 	}
 }

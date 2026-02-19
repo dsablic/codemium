@@ -90,11 +90,15 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 
 	case "github":
 		clientID := os.Getenv("CODEMIUM_GITHUB_CLIENT_ID")
-		if clientID == "" {
-			return fmt.Errorf("set CODEMIUM_GITHUB_CLIENT_ID environment variable")
+		if clientID != "" {
+			gh := &auth.GitHubOAuth{ClientID: clientID, OpenBrowser: true}
+			cred, err = gh.Login(ctx)
+		} else if token, ok := auth.GhCLIToken(); ok {
+			fmt.Fprintln(os.Stderr, "Using token from gh CLI")
+			cred = auth.Credentials{AccessToken: token}
+		} else {
+			return fmt.Errorf("install gh CLI and run 'gh auth login', or set CODEMIUM_GITHUB_CLIENT_ID")
 		}
-		gh := &auth.GitHubOAuth{ClientID: clientID, OpenBrowser: true}
-		cred, err = gh.Login(ctx)
 
 	default:
 		return fmt.Errorf("unsupported provider: %s (use bitbucket or github)", providerName)

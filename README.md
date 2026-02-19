@@ -19,6 +19,12 @@ Generate code statistics across all repositories in a Bitbucket Cloud workspace 
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install dsablic/tap/codemium
+```
+
 ### Pre-built binaries
 
 Download from the [releases page](https://github.com/dsablic/codemium/releases).
@@ -53,24 +59,42 @@ export CODEMIUM_BITBUCKET_TOKEN=your_api_token
 
 ### GitHub
 
-**Option 1: OAuth device flow (interactive)**
+**Option 1: gh CLI (recommended)**
 
-1. Create a GitHub OAuth App (or use an existing one)
-2. Set:
-   ```bash
-   export CODEMIUM_GITHUB_CLIENT_ID=your_client_id
-   ```
-3. Run:
-   ```bash
-   codemium auth login --provider github
-   ```
-   This displays a code to enter at github.com/login/device.
+If you already have the [GitHub CLI](https://cli.github.com/) installed and authenticated, codemium uses its token automatically — no extra setup needed:
 
-**Option 2: Environment variable (CI/CD)**
+```bash
+# If not already authenticated:
+gh auth login
+
+# Then just run codemium directly:
+codemium analyze --provider github --org myorg
+```
+
+You can also explicitly save the token to codemium's credential store:
+
+```bash
+codemium auth login --provider github
+```
+
+**Option 2: OAuth device flow**
+
+If you have a GitHub OAuth App, you can use the device flow instead:
+
+```bash
+export CODEMIUM_GITHUB_CLIENT_ID=your_client_id
+codemium auth login --provider github
+```
+
+This displays a code to enter at github.com/login/device.
+
+**Option 3: Environment variable (CI/CD)**
 
 ```bash
 export CODEMIUM_GITHUB_TOKEN=your_personal_access_token
 ```
+
+**Resolution order:** `CODEMIUM_GITHUB_TOKEN` env var > saved credentials > `gh auth token` CLI.
 
 ## Usage
 

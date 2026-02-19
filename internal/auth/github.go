@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -79,6 +80,20 @@ func (g *GitHubOAuth) requestDeviceCode(ctx context.Context) (deviceCodeResponse
 		return deviceCodeResponse{}, fmt.Errorf("decode device code response: %w", err)
 	}
 	return result, nil
+}
+
+// GhCLIToken attempts to get a GitHub token from the gh CLI tool.
+// Returns the token and true if successful, or empty string and false otherwise.
+func GhCLIToken() (string, bool) {
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return "", false
+	}
+	token := strings.TrimSpace(string(out))
+	if token == "" {
+		return "", false
+	}
+	return token, true
 }
 
 func (g *GitHubOAuth) pollForToken(ctx context.Context, deviceCode string, interval time.Duration) (Credentials, error) {

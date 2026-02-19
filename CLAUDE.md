@@ -22,7 +22,7 @@ internal/
   auth/                OAuth flows + credential storage
     credentials.go     FileStore: ~/.config/codemium/credentials.json
     bitbucket.go       Authorization code grant with local callback server
-    github.go          Device flow (like gh auth login)
+    github.go          Device flow + gh CLI token fallback
   provider/            Repository listing from APIs
     provider.go        Provider interface definition
     bitbucket.go       Bitbucket Cloud REST API v2.0
@@ -51,7 +51,7 @@ internal/
 - **Provider abstraction**: `provider.Provider` interface allows adding new git hosting providers. Each provider implements `ListRepos(ctx, ListOpts)`.
 - **Worker pool**: Bounded goroutine pool with semaphore pattern. Configurable concurrency via `--concurrency` flag.
 - **Partial failure**: Repos that fail to clone or analyze are recorded as errors in the report; the run continues.
-- **Auth**: Credentials stored at `~/.config/codemium/credentials.json` (0600 perms). Env vars (`CODEMIUM_<PROVIDER>_TOKEN`) checked first as fallback for CI/CD.
+- **Auth**: Credentials stored at `~/.config/codemium/credentials.json` (0600 perms). Resolution order: env vars (`CODEMIUM_<PROVIDER>_TOKEN`) → saved credentials → `gh auth token` CLI (GitHub only).
 - **Clone strategy**: Shallow clone (depth 1, single branch, no tags) to temp dir, deleted after analysis.
 - **scc initialization**: `processor.ProcessConstants()` called via `sync.Once` since scc requires global initialization.
 
@@ -61,6 +61,7 @@ internal/
 - All packages have corresponding `_test.go` files
 - Test servers (httptest) used for provider and auth tests
 - No external tools required at runtime (no git binary, no scc binary)
+- After code changes, update relevant docs (README.md, this file) to reflect new behavior, flags, auth flows, etc.
 
 ## Release
 

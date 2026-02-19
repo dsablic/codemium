@@ -84,7 +84,17 @@ func (s *FileStore) LoadWithEnv(provider string) (Credentials, error) {
 		cred.Username = os.Getenv(userKey)
 		return cred, nil
 	}
-	return s.Load(provider)
+	cred, err := s.Load(provider)
+	if err == nil {
+		return cred, nil
+	}
+	// For GitHub, try the gh CLI as a last fallback
+	if provider == "github" {
+		if token, ok := GhCLIToken(); ok {
+			return Credentials{AccessToken: token}, nil
+		}
+	}
+	return Credentials{}, ErrNoCredentials
 }
 
 func (s *FileStore) loadAll() (map[string]Credentials, error) {

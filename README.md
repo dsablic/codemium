@@ -126,6 +126,8 @@ codemium analyze --provider github --org myorg --repos api,frontend
 
 ### Analyze trends over time
 
+The `trends` command analyzes repositories at historical points in time using git history, showing how codebases evolve over configurable intervals.
+
 ```bash
 # Monthly trends for the past year
 codemium trends --provider github --org myorg --since 2025-03 --until 2026-02
@@ -137,6 +139,8 @@ codemium trends --provider github --org myorg --since 2025-01-01 --until 2025-03
 codemium trends --provider github --org myorg --since 2025-01 --until 2025-12 --output trends.json
 codemium markdown trends.json > trends.md
 ```
+
+**Note:** For Bitbucket, `trends` requires OAuth credentials (not API tokens), since it needs to clone full git history. Set `CODEMIUM_BITBUCKET_CLIENT_ID` and `CODEMIUM_BITBUCKET_CLIENT_SECRET`, then run `codemium auth login --provider bitbucket`.
 
 ### Output options
 

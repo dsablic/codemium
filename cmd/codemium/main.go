@@ -21,6 +21,7 @@ import (
 	"github.com/dsablic/codemium/internal/auth"
 	"github.com/dsablic/codemium/internal/history"
 	"github.com/dsablic/codemium/internal/model"
+	"github.com/dsablic/codemium/internal/narrative"
 	"github.com/dsablic/codemium/internal/output"
 	"github.com/dsablic/codemium/internal/provider"
 	"github.com/dsablic/codemium/internal/ui"
@@ -367,13 +368,20 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 }
 
 func newMarkdownCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "markdown [file]",
 		Short: "Convert JSON report to markdown",
 		Long:  "Reads a JSON report from a file argument or stdin and writes markdown to stdout.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runMarkdown,
 	}
+
+	cmd.Flags().Bool("narrative", false, "Generate AI narrative analysis instead of tables")
+	cmd.Flags().String("ai-cli", "", "AI CLI to use (claude, codex, gemini). Default: auto-detect")
+	cmd.Flags().String("ai-prompt", "", "Additional instructions for the AI narrative")
+	cmd.Flags().String("ai-prompt-file", "", "Read additional AI instructions from file")
+
+	return cmd
 }
 
 func runMarkdown(cmd *cobra.Command, args []string) error {
@@ -392,6 +400,12 @@ func runMarkdown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read input: %w", err)
 	}
 
+	useNarrative, _ := cmd.Flags().GetBool("narrative")
+
+	if useNarrative {
+		return runNarrative(cmd, data)
+	}
+
 	// Auto-detect report type: try TrendsReport first
 	var trends model.TrendsReport
 	if err := json.Unmarshal(data, &trends); err == nil && len(trends.Snapshots) > 0 {
@@ -404,6 +418,44 @@ func runMarkdown(cmd *cobra.Command, args []string) error {
 	}
 
 	return output.WriteMarkdown(os.Stdout, report)
+}
+
+func runNarrative(cmd *cobra.Command, data []byte) error {
+	aiCLI, _ := cmd.Flags().GetString("ai-cli")
+	aiPrompt, _ := cmd.Flags().GetString("ai-prompt")
+	aiPromptFile, _ := cmd.Flags().GetString("ai-prompt-file")
+
+	if aiPrompt != "" && aiPromptFile != "" {
+		return fmt.Errorf("--ai-prompt and --ai-prompt-file are mutually exclusive")
+	}
+
+	if aiPromptFile != "" {
+		content, err := os.ReadFile(aiPromptFile)
+		if err != nil {
+			return fmt.Errorf("read prompt file: %w", err)
+		}
+		aiPrompt = string(content)
+	}
+
+	if aiCLI == "" {
+		detected, err := narrative.DetectCLI()
+		if err != nil {
+			return err
+		}
+		aiCLI = detected
+		fmt.Fprintf(os.Stderr, "Using %s for narrative generation\n", aiCLI)
+	}
+
+	prompt := narrative.DefaultPrompt(aiPrompt)
+
+	ctx := cmd.Context()
+	result, err := narrative.Generate(ctx, aiCLI, data, prompt)
+	if err != nil {
+		return fmt.Errorf("narrative generation: %w", err)
+	}
+
+	fmt.Fprint(os.Stdout, result)
+	return nil
 }
 
 func buildReport(providerName, workspace, org string, projects, repos, exclude []string, results []worker.Result) model.Report {

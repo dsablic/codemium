@@ -2,11 +2,14 @@ package aiestimate
 
 import (
 	"context"
+	"sync"
 
 	"github.com/dsablic/codemium/internal/aidetect"
 	"github.com/dsablic/codemium/internal/model"
 	"github.com/dsablic/codemium/internal/provider"
 )
+
+const statsConcurrency = 10
 
 // Estimate computes AI attribution metrics for a single repo.
 func Estimate(ctx context.Context, cl provider.CommitLister, repo model.Repo, commitLimit int) (*model.AIEstimate, error) {
@@ -38,14 +41,40 @@ func Estimate(ctx context.Context, cl provider.CommitLister, repo model.Repo, co
 		est.CommitPercent = float64(est.AICommits) / float64(est.TotalCommits) * 100
 	}
 
-	// Fetch stats only for AI-flagged commits
-	for _, fc := range flagged {
-		additions, deletions, err := cl.CommitStats(ctx, repo, fc.info.Hash)
-		if err != nil {
+	// Fetch stats for AI-flagged commits concurrently
+	type commitDetail struct {
+		index     int
+		additions int64
+		deletions int64
+		err       error
+	}
+
+	details := make([]commitDetail, len(flagged))
+	sem := make(chan struct{}, statsConcurrency)
+	var wg sync.WaitGroup
+
+	for i, fc := range flagged {
+		if ctx.Err() != nil {
+			break
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(idx int, hash string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			add, del, err := cl.CommitStats(ctx, repo, hash)
+			details[idx] = commitDetail{index: idx, additions: add, deletions: del, err: err}
+		}(i, fc.info.Hash)
+	}
+	wg.Wait()
+
+	for i, fc := range flagged {
+		d := details[i]
+		if d.err != nil {
 			continue // partial failure — skip this commit's stats
 		}
 
-		est.AIAdditions += additions
+		est.AIAdditions += d.additions
 
 		// Extract first line of commit message
 		firstLine := fc.info.Message
@@ -61,8 +90,8 @@ func Estimate(ctx context.Context, cl provider.CommitLister, repo model.Repo, co
 			Author:    fc.info.Author,
 			Message:   firstLine,
 			Signals:   fc.signals,
-			Additions: additions,
-			Deletions: deletions,
+			Additions: d.additions,
+			Deletions: d.deletions,
 		})
 	}
 

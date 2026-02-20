@@ -124,6 +124,16 @@ codemium analyze --provider github --org myorg
 codemium analyze --provider github --org myorg --repos api,frontend
 ```
 
+### Analyze a GitHub user's repos
+
+```bash
+# All repos for a user (includes private repos the token has access to)
+codemium analyze --provider github --user myuser
+
+# Specific repos
+codemium analyze --provider github --user myuser --repos repo1,repo2
+```
+
 ### Analyze trends over time
 
 The `trends` command analyzes repositories at historical points in time using git history, showing how codebases evolve over configurable intervals.

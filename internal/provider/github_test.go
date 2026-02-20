@@ -57,6 +57,34 @@ func TestGitHubListRepos(t *testing.T) {
 	}
 }
 
+func TestGitHubListReposUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Errorf("expected path /user/repos, got %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"name": "personal-repo", "full_name": "myuser/personal-repo", "html_url": "https://github.com/myuser/personal-repo", "clone_url": "https://github.com/myuser/personal-repo.git", "archived": false, "fork": false},
+		})
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL)
+	repos, err := gh.ListRepos(context.Background(), provider.ListOpts{
+		User: "myuser",
+	})
+	if err != nil {
+		t.Fatalf("failed to list repos: %v", err)
+	}
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(repos))
+	}
+	if repos[0].Slug != "personal-repo" {
+		t.Errorf("expected personal-repo, got %s", repos[0].Slug)
+	}
+}
+
 func TestGitHubExcludeForksAndArchived(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]map[string]any{

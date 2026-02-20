@@ -11,6 +11,7 @@ import (
 type ListOpts struct {
 	Workspace       string
 	Organization    string
+	User            string
 	Projects        []string
 	Repos           []string
 	Exclude         []string

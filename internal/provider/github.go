@@ -38,7 +38,15 @@ func NewGitHub(token string, baseURL string) *GitHub {
 func (g *GitHub) ListRepos(ctx context.Context, opts ListOpts) ([]model.Repo, error) {
 	var allRepos []model.Repo
 
-	nextURL := fmt.Sprintf("%s/orgs/%s/repos?per_page=100&type=all", g.baseURL, opts.Organization)
+	var nextURL string
+	switch {
+	case opts.User != "":
+		// Use the authenticated /user/repos endpoint which includes private repos,
+		// filtered to repos owned by the authenticated user.
+		nextURL = fmt.Sprintf("%s/user/repos?per_page=100&affiliation=owner", g.baseURL)
+	default:
+		nextURL = fmt.Sprintf("%s/orgs/%s/repos?per_page=100&type=all", g.baseURL, opts.Organization)
+	}
 
 	for nextURL != "" {
 		repos, next, err := g.fetchPage(ctx, nextURL)

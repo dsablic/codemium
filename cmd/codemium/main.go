@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/dsablic/codemium/internal/aiestimate"
 	"github.com/dsablic/codemium/internal/analyzer"
 	"github.com/dsablic/codemium/internal/auth"
 	"github.com/dsablic/codemium/internal/history"
@@ -193,6 +194,8 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().Bool("include-forks", false, "Include forked repos")
 	cmd.Flags().Int("concurrency", 5, "Number of parallel workers")
 	cmd.Flags().String("output", "output/report.json", "Write JSON to file")
+	cmd.Flags().Bool("ai-estimate", false, "Estimate AI-written code percentage")
+	cmd.Flags().Int("ai-commit-limit", 500, "Max commits to scan per repo for AI estimation (0 = unlimited)")
 
 	cmd.MarkFlagRequired("provider")
 
@@ -352,6 +355,71 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		// Give TUI a moment to render the done message
 		time.Sleep(100 * time.Millisecond)
 		program.Quit()
+		program = nil
+	}
+
+	// AI estimation phase
+	aiEstimateFlag, _ := cmd.Flags().GetBool("ai-estimate")
+	aiCommitLimit, _ := cmd.Flags().GetInt("ai-commit-limit")
+
+	if aiEstimateFlag {
+		commitLister, ok := prov.(provider.CommitLister)
+		if !ok {
+			return fmt.Errorf("provider %s does not support AI estimation", providerName)
+		}
+
+		fmt.Fprintln(os.Stderr, "Estimating AI contribution...")
+
+		if useTUI {
+			program = ui.RunTUI(len(repoList))
+			go func() { program.Run() }()
+		}
+
+		aiProgressFn := func(completed, total int, repo model.Repo) {
+			if useTUI && program != nil {
+				program.Send(ui.ProgressMsg{
+					Completed: completed,
+					Total:     total,
+					RepoName:  repo.Slug,
+				})
+			} else {
+				fmt.Fprintf(os.Stderr, "[%d/%d] Scanned %s\n", completed, total, repo.Slug)
+			}
+		}
+
+		aiResults := worker.RunWithProgress(ctx, repoList, concurrency, func(ctx context.Context, repo model.Repo) (*model.RepoStats, error) {
+			est, err := aiestimate.Estimate(ctx, commitLister, repo, aiCommitLimit)
+			if err != nil {
+				return nil, err
+			}
+			return &model.RepoStats{
+				Repository: repo.Slug,
+				AIEstimate: est,
+			}, nil
+		}, aiProgressFn)
+
+		if useTUI && program != nil {
+			program.Send(ui.DoneMsg{})
+			time.Sleep(100 * time.Millisecond)
+			program.Quit()
+			program = nil
+		}
+
+		// Attach AI estimates to analysis results
+		aiByRepo := make(map[string]*model.AIEstimate)
+		for _, r := range aiResults {
+			if r.Err == nil && r.Stats != nil && r.Stats.AIEstimate != nil {
+				aiByRepo[r.Repo.Slug] = r.Stats.AIEstimate
+			}
+		}
+
+		for i := range results {
+			if results[i].Stats != nil {
+				if est, ok := aiByRepo[results[i].Repo.Slug]; ok {
+					results[i].Stats.AIEstimate = est
+				}
+			}
+		}
 	}
 
 	// Build report — use user as organization in metadata when --user is set
@@ -530,6 +598,31 @@ func buildReport(providerName, workspace, org string, projects, repos, exclude [
 	sort.Slice(report.ByLanguage, func(i, j int) bool {
 		return report.ByLanguage[i].Code > report.ByLanguage[j].Code
 	})
+
+	// Aggregate AI estimates
+	var hasAI bool
+	var totalCommits, aiCommits, aiAdditions int64
+	for _, r := range results {
+		if r.Err != nil || r.Stats == nil || r.Stats.AIEstimate == nil {
+			continue
+		}
+		hasAI = true
+		totalCommits += r.Stats.AIEstimate.TotalCommits
+		aiCommits += r.Stats.AIEstimate.AICommits
+		aiAdditions += r.Stats.AIEstimate.AIAdditions
+	}
+	if hasAI {
+		var commitPct float64
+		if totalCommits > 0 {
+			commitPct = float64(aiCommits) / float64(totalCommits) * 100
+		}
+		report.AIEstimate = &model.AIEstimate{
+			TotalCommits:  totalCommits,
+			AICommits:     aiCommits,
+			CommitPercent: commitPct,
+			AIAdditions:   aiAdditions,
+		}
+	}
 
 	return report
 }

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/dsablic/codemium/internal/model"
 	"github.com/dsablic/codemium/internal/provider"
 )
 
@@ -104,5 +106,112 @@ func TestGitHubExcludeForksAndArchived(t *testing.T) {
 	}
 	if repos[0].Slug != "active" {
 		t.Errorf("expected active, got %s", repos[0].Slug)
+	}
+}
+
+func TestGitHubListCommits(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/repos/myorg/repo-1/commits") && !strings.Contains(r.URL.Path, "/repos/myorg/repo-1/commits/") {
+			json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"sha": "abc123",
+					"commit": map[string]any{
+						"author":  map[string]any{"name": "Dev", "email": "dev@example.com"},
+						"message": "feat: add feature\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+					},
+				},
+				{
+					"sha": "def456",
+					"commit": map[string]any{
+						"author":  map[string]any{"name": "Dev", "email": "dev@example.com"},
+						"message": "fix: bug",
+					},
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL)
+	commits, err := gh.ListCommits(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  "https://github.com/myorg/repo-1",
+	}, 100)
+	if err != nil {
+		t.Fatalf("ListCommits: %v", err)
+	}
+	if len(commits) != 2 {
+		t.Fatalf("expected 2 commits, got %d", len(commits))
+	}
+	if commits[0].Hash != "abc123" {
+		t.Errorf("expected hash abc123, got %s", commits[0].Hash)
+	}
+	if !strings.Contains(commits[0].Message, "Co-Authored-By") {
+		t.Error("expected full commit message with trailers")
+	}
+}
+
+func TestGitHubCommitStats(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/myorg/repo-1/commits/abc123" {
+			json.NewEncoder(w).Encode(map[string]any{
+				"sha": "abc123",
+				"stats": map[string]any{
+					"additions": 150,
+					"deletions": 30,
+				},
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL)
+	additions, deletions, err := gh.CommitStats(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  "https://github.com/myorg/repo-1",
+	}, "abc123")
+	if err != nil {
+		t.Fatalf("CommitStats: %v", err)
+	}
+	if additions != 150 {
+		t.Errorf("expected 150 additions, got %d", additions)
+	}
+	if deletions != 30 {
+		t.Errorf("expected 30 deletions, got %d", deletions)
+	}
+}
+
+func TestGitHubListCommitsLimit(t *testing.T) {
+	page := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page++
+		commits := make([]map[string]any, 100)
+		for i := range commits {
+			commits[i] = map[string]any{
+				"sha":    fmt.Sprintf("hash-%d-%d", page, i),
+				"commit": map[string]any{"author": map[string]any{"name": "Dev", "email": "d@e.com"}, "message": "msg"},
+			}
+		}
+		if page == 1 {
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?page=2&per_page=100>; rel="next"`, "http://"+r.Host, r.URL.Path))
+		}
+		json.NewEncoder(w).Encode(commits)
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL)
+	commits, err := gh.ListCommits(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  "https://github.com/myorg/repo-1",
+	}, 150)
+	if err != nil {
+		t.Fatalf("ListCommits: %v", err)
+	}
+	if len(commits) != 150 {
+		t.Errorf("expected 150 commits (limited), got %d", len(commits))
 	}
 }

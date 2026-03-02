@@ -76,6 +76,16 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 		fmt.Fprintln(w)
 	}
 
+	// Secrets Summary (only if present)
+	if report.SecretsSummary != nil {
+		fmt.Fprintf(w, "## Secret Scanning\n\n")
+		fmt.Fprintf(w, "| Metric | Value |\n")
+		fmt.Fprintf(w, "|--------|-------|\n")
+		fmt.Fprintf(w, "| Total Findings | %d |\n", report.SecretsSummary.TotalFindings)
+		fmt.Fprintf(w, "| Repos with Secrets | %d |\n", report.SecretsSummary.ReposWithSecrets)
+		fmt.Fprintln(w)
+	}
+
 	// By language
 	fmt.Fprintf(w, "## Languages\n\n")
 	fmt.Fprintf(w, "| Language | Files | Code | Comments | Blanks | Complexity |\n")
@@ -89,6 +99,7 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 	// Per repository
 	hasAI := report.AIEstimate != nil
 	hasHealth := report.HealthSummary != nil
+	hasSecrets := report.SecretsSummary != nil
 	fmt.Fprintf(w, "## Repositories\n\n")
 
 	// Build header based on which optional columns are present
@@ -101,6 +112,10 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 	if hasAI {
 		header += " | AI Commits % | AI Additions"
 		separator += "|-------------:|-------------:"
+	}
+	if hasSecrets {
+		header += " | Secrets"
+		separator += "|--------:"
 	}
 	fmt.Fprintf(w, "%s |\n%s|\n", header, separator)
 
@@ -134,6 +149,13 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 				aiAdd = fmt.Sprintf("%d", repo.AIEstimate.AIAdditions)
 			}
 			fmt.Fprintf(w, " | %s | %s", aiPct, aiAdd)
+		}
+		if hasSecrets {
+			secretsStr := "0"
+			if repo.Secrets != nil && repo.Secrets.FindingsCount > 0 {
+				secretsStr = fmt.Sprintf("%d", repo.Secrets.FindingsCount)
+			}
+			fmt.Fprintf(w, " | %s", secretsStr)
 		}
 		fmt.Fprintln(w, " |")
 	}

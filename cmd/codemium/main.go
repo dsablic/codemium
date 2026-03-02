@@ -28,6 +28,7 @@ import (
 	"github.com/dsablic/codemium/internal/license"
 	"github.com/dsablic/codemium/internal/model"
 	"github.com/dsablic/codemium/internal/narrative"
+	"github.com/dsablic/codemium/internal/secrets"
 	"github.com/dsablic/codemium/internal/output"
 	"github.com/dsablic/codemium/internal/provider"
 	"github.com/dsablic/codemium/internal/ui"
@@ -275,6 +276,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().Int("churn-limit", 500, "Max commits to scan per repo for churn analysis (0 = unlimited)")
 	cmd.Flags().Float64("rate-limit", 0, "Max API requests per second (0 = unlimited)")
 	cmd.Flags().String("clone", "", "Persist cloned repos to directory (reuses existing clones)")
+	cmd.Flags().Bool("secrets", false, "Scan repositories for secrets (API keys, tokens, passwords)")
 
 	cmd.MarkFlagRequired("provider")
 
@@ -299,6 +301,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	outputPath, _ := cmd.Flags().GetString("output")
 	rateLimit, _ := cmd.Flags().GetFloat64("rate-limit")
 	cloneDir, _ := cmd.Flags().GetString("clone")
+	secretsFlag, _ := cmd.Flags().GetBool("secrets")
 
 	// Create rate-limited HTTP client
 	httpClient := &http.Client{Transport: &provider.RateLimitTransport{ReqPerSec: rateLimit}}
@@ -451,6 +454,11 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		}
 
 		stats.License = license.Detect(dir)
+		if secretsFlag {
+			if sr, err := secrets.Scan(dir); err == nil {
+				stats.Secrets = sr
+			}
+		}
 		stats.Repository = repo.Slug
 		stats.Project = repo.Project
 		stats.Provider = repo.Provider
@@ -938,6 +946,21 @@ func buildReport(providerName, workspace, org string, projects, repos, exclude [
 
 	// Aggregate health summary
 	report.HealthSummary = health.Summarize(report.Repositories)
+
+	// Aggregate secrets summary
+	var totalFindings, reposWithSecrets int
+	for _, repo := range report.Repositories {
+		if repo.Secrets != nil && repo.Secrets.FindingsCount > 0 {
+			totalFindings += repo.Secrets.FindingsCount
+			reposWithSecrets++
+		}
+	}
+	if reposWithSecrets > 0 {
+		report.SecretsSummary = &model.SecretsAggregate{
+			TotalFindings:    totalFindings,
+			ReposWithSecrets: reposWithSecrets,
+		}
+	}
 
 	return report
 }

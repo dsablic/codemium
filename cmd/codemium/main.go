@@ -28,6 +28,7 @@ import (
 	"github.com/dsablic/codemium/internal/license"
 	"github.com/dsablic/codemium/internal/model"
 	"github.com/dsablic/codemium/internal/narrative"
+	"github.com/dsablic/codemium/internal/sbom"
 	"github.com/dsablic/codemium/internal/secrets"
 	"github.com/dsablic/codemium/internal/output"
 	"github.com/dsablic/codemium/internal/provider"
@@ -277,6 +278,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().Float64("rate-limit", 0, "Max API requests per second (0 = unlimited)")
 	cmd.Flags().String("clone", "", "Persist cloned repos to directory (reuses existing clones)")
 	cmd.Flags().Bool("secrets", false, "Scan repositories for secrets (API keys, tokens, passwords)")
+	cmd.Flags().Bool("sbom", false, "Generate dependency inventory (SBOM) per repository")
 
 	cmd.MarkFlagRequired("provider")
 
@@ -302,6 +304,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	rateLimit, _ := cmd.Flags().GetFloat64("rate-limit")
 	cloneDir, _ := cmd.Flags().GetString("clone")
 	secretsFlag, _ := cmd.Flags().GetBool("secrets")
+	sbomFlag, _ := cmd.Flags().GetBool("sbom")
 
 	// Create rate-limited HTTP client
 	httpClient := &http.Client{Transport: &provider.RateLimitTransport{ReqPerSec: rateLimit}}
@@ -457,6 +460,11 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		if secretsFlag {
 			if sr, err := secrets.Scan(dir); err == nil {
 				stats.Secrets = sr
+			}
+		}
+		if sbomFlag {
+			if sr, err := sbom.Scan(ctx, dir); err == nil {
+				stats.SBOM = sr
 			}
 		}
 		stats.Repository = repo.Slug
@@ -959,6 +967,33 @@ func buildReport(providerName, workspace, org string, projects, repos, exclude [
 		report.SecretsSummary = &model.SecretsAggregate{
 			TotalFindings:    totalFindings,
 			ReposWithSecrets: reposWithSecrets,
+		}
+	}
+
+	// Aggregate SBOM summary
+	var sbomTotalDeps, reposWithDeps int
+	sbomEcoCounts := map[string]int{}
+	for _, repo := range report.Repositories {
+		if repo.SBOM != nil && repo.SBOM.TotalDeps > 0 {
+			sbomTotalDeps += repo.SBOM.TotalDeps
+			reposWithDeps++
+			for _, eco := range repo.SBOM.Ecosystems {
+				sbomEcoCounts[eco.Ecosystem] += eco.Count
+			}
+		}
+	}
+	if reposWithDeps > 0 {
+		ecos := make([]model.EcosystemDeps, 0, len(sbomEcoCounts))
+		for eco, count := range sbomEcoCounts {
+			ecos = append(ecos, model.EcosystemDeps{Ecosystem: eco, Count: count})
+		}
+		sort.Slice(ecos, func(i, j int) bool {
+			return ecos[i].Count > ecos[j].Count
+		})
+		report.SBOMSummary = &model.SBOMAggregate{
+			TotalDeps:     sbomTotalDeps,
+			ReposWithDeps: reposWithDeps,
+			Ecosystems:    ecos,
 		}
 	}
 

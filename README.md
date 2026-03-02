@@ -277,6 +277,30 @@ Health categories:
 - **Abandoned**: > 365 days ago
 - **Failed**: commit history could not be fetched (API error, permissions, etc.)
 
+### Persistent cloning
+
+By default, repos are cloned to a temp directory and deleted after analysis. Use `--clone` to keep them:
+
+```bash
+# Clone repos to ./repos/<repo-slug>/ and keep them after analysis
+codemium analyze --provider github --org myorg --clone ./repos
+
+# Subsequent runs reuse existing clones (no re-download)
+codemium analyze --provider github --org myorg --clone ./repos
+```
+
+### Secret scanning
+
+Scan repositories for leaked secrets (API keys, tokens, passwords) using gitleaks:
+
+```bash
+codemium analyze --provider github --org myorg --secrets
+```
+
+Results show per-repo finding counts and which files contain secrets (actual secret values are never included in the report).
+
+### Rate limiting and error logging
+
 API requests that receive a 429 (Too Many Requests) response are automatically retried with exponential backoff (up to 5 retries). Use `--rate-limit` to proactively throttle requests and avoid hitting rate limits (e.g., `--rate-limit 5` for GitLab's 300 req/min raw endpoint limit).
 
 When API errors occur during health classification, AI estimation, or detailed analysis, an error log is automatically written next to the JSON report (e.g., `output/report.error.log` for `output/report.json`). Each line is prefixed with a category (`[health]`, `[health-details]`, `[ai-estimate]`, `[ai-estimate-detail]`) for easy filtering with `grep`.

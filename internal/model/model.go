@@ -53,6 +53,7 @@ type RepoStats struct {
 	Health        *RepoHealth        `json:"health,omitempty"`
 	HealthDetails *RepoHealthDetails `json:"health_details,omitempty"`
 	Secrets       *SecretsReport     `json:"secrets,omitempty"`
+	SBOM          *SBOMReport        `json:"sbom,omitempty"`
 }
 
 // RepoError records a repository that failed to process.
@@ -169,6 +170,25 @@ type SecretsAggregate struct {
 	ReposWithSecrets int `json:"repos_with_secrets"`
 }
 
+// EcosystemDeps holds dependency count for a single package ecosystem.
+type EcosystemDeps struct {
+	Ecosystem string `json:"ecosystem"`
+	Count     int    `json:"count"`
+}
+
+// SBOMReport holds dependency inventory for a single repository.
+type SBOMReport struct {
+	TotalDeps  int             `json:"total_deps"`
+	Ecosystems []EcosystemDeps `json:"ecosystems,omitempty"`
+}
+
+// SBOMAggregate holds aggregate dependency data across all repos.
+type SBOMAggregate struct {
+	TotalDeps     int             `json:"total_deps"`
+	ReposWithDeps int             `json:"repos_with_deps"`
+	Ecosystems    []EcosystemDeps `json:"ecosystems,omitempty"`
+}
+
 // Filters records what filters were applied to the analysis.
 type Filters struct {
 	Projects []string `json:"projects,omitempty"`
@@ -213,4 +233,5 @@ type Report struct {
 	AIEstimate    *AIEstimate     `json:"ai_estimate,omitempty"`
 	HealthSummary  *HealthSummary    `json:"health_summary,omitempty"`
 	SecretsSummary *SecretsAggregate `json:"secrets_summary,omitempty"`
+	SBOMSummary    *SBOMAggregate    `json:"sbom_summary,omitempty"`
 }

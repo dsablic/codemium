@@ -51,6 +51,8 @@ internal/
     estimate.go         AI estimation orchestrator (per-repo commit scanning)
   secrets/
     secrets.go          Gitleaks-based secret scanning per repo
+  sbom/
+    sbom.go             Syft-based SBOM dependency inventory per repo
   health/
     health.go           Health classification (Classify, ClassifyFromCommits)
     details.go          Deep health analysis (authors, churn, velocity per window)
@@ -69,6 +71,7 @@ internal/
 - **Cobra** (`github.com/spf13/cobra`) - CLI framework
 - **Bubbletea/Bubbles/Lipgloss** - Terminal UI for progress display
 - **gitleaks** (`github.com/zricethezav/gitleaks/v8`) - Secret scanning for API keys, tokens, passwords
+- **syft** (`github.com/anchore/syft`) - SBOM generation and dependency inventory across ecosystems
 
 ## Architecture Notes
 
@@ -87,6 +90,7 @@ internal/
 - **Code churn / hotspots**: Opt-in via `--churn` flag. Uses provider REST APIs to fetch per-file change data (`--churn-limit N` sets max commits, default 500). `churn.Analyze` collects per-file change frequencies; `churn.ComputeHotspots` ranks files by churn x complexity. Top 20 hotspots shown per repo.
 - **Durable clone**: When `--clone <dir>` is set, repos are cloned to `<dir>/<repo-slug>/` with a no-op cleanup function. Existing directories are reused without re-cloning (cache behavior). Works with both `Clone()` and `Download()` paths.
 - **Secret scanning**: When `--secrets` is used, each repo is scanned for secrets (API keys, tokens, passwords) using gitleaks v8 as a Go library. Runs during the main analysis phase on the cloned directory. Results include finding count and list of files with secrets (no actual secret values). Aggregate summary added to report.
+- **SBOM / Dependency inventory**: When `--sbom` is used, each repo is scanned for dependencies using syft as a Go library. Detects packages across ecosystems (Go modules, npm, pip, Maven, etc.). Results include per-repo total dependency count and ecosystem breakdown. Aggregate summary added to report.
 
 ## Conventions
 

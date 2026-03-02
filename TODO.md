@@ -45,6 +45,7 @@ Potential off-the-shelf Go libraries to integrate into codemium, ordered by valu
 - **What:** Generate Software Bill of Materials — list all dependencies across ecosystems (Go, npm, pip, etc.)
 - **Why:** Dependency count, ecosystem breakdown, and supply chain visibility are increasingly required for compliance. Multi-language.
 - **Effort:** Medium-high — large dependency footprint, but clean library API
+- **Status: Done** — Opt-in via `--sbom` flag. Uses syft as a Go library to detect dependencies across ecosystems (Go, npm, pip, Maven, etc.). Per-repo summary shows total count and ecosystem breakdown.
 
 ## Tier 3 — Valuable for Go-Heavy Workspaces
 

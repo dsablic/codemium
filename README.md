@@ -299,6 +299,16 @@ codemium analyze --provider github --org myorg --secrets
 
 Results show per-repo finding counts and which files contain secrets (actual secret values are never included in the report).
 
+### Dependency inventory (SBOM)
+
+Generate a software bill of materials for each repository:
+
+```bash
+codemium analyze --provider github --org myorg --sbom
+```
+
+The report includes per-repo dependency counts with ecosystem breakdown (e.g. go-module, npm, pip).
+
 ### Rate limiting and error logging
 
 API requests that receive a 429 (Too Many Requests) response are automatically retried with exponential backoff (up to 5 retries). Use `--rate-limit` to proactively throttle requests and avoid hitting rate limits (e.g., `--rate-limit 5` for GitLab's 300 req/min raw endpoint limit).
@@ -321,6 +331,7 @@ When API errors occur during health classification, AI estimation, or detailed a
 --churn-limit 500           # Max commits to scan per repo for churn (default: 500)
 --clone ./repos                 # Persist cloned repos to directory (reuses existing clones)
 --secrets                       # Scan repos for secrets (API keys, tokens, passwords)
+--sbom                          # Generate dependency inventory (SBOM) per repository
 ```
 
 ## Output Format

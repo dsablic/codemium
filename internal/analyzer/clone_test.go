@@ -111,3 +111,119 @@ func TestCheckout(t *testing.T) {
 		t.Errorf("b.txt should not exist after checkout to commit1, got err: %v", err)
 	}
 }
+
+func TestCloneTo_NewDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping clone test in short mode")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	cloner := analyzer.NewCloner("", "")
+
+	destDir := filepath.Join(t.TempDir(), "newclone")
+
+	dir, cleanup, err := cloner.CloneTo(ctx, "https://github.com/kelseyhightower/nocode.git", destDir)
+	if err != nil {
+		t.Fatalf("CloneTo failed: %v", err)
+	}
+
+	if dir != destDir {
+		t.Fatalf("expected dir %q, got %q", destDir, dir)
+	}
+
+	// Verify directory exists and has files
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("failed to read cloned dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("cloned directory is empty")
+	}
+
+	// Cleanup should be a no-op — directory persists
+	cleanup()
+
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("expected directory to persist after cleanup, got: %v", err)
+	}
+}
+
+func TestCloneTo_ExistingDirectory(t *testing.T) {
+	ctx := context.Background()
+
+	destDir := t.TempDir()
+
+	// Write a marker file to prove the directory is not re-cloned.
+	marker := filepath.Join(destDir, "marker.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	cloner := analyzer.NewCloner("", "")
+
+	dir, cleanup, err := cloner.CloneTo(ctx, "https://fake.invalid/repo.git", destDir)
+	if err != nil {
+		t.Fatalf("CloneTo failed: %v", err)
+	}
+
+	if dir != destDir {
+		t.Fatalf("expected dir %q, got %q", destDir, dir)
+	}
+
+	// Marker file must still exist (no re-clone happened).
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("marker file missing after CloneTo: %v", err)
+	}
+	if string(data) != "keep" {
+		t.Fatalf("marker file contents changed: %q", data)
+	}
+
+	// Cleanup is a no-op.
+	cleanup()
+
+	if _, err := os.Stat(destDir); err != nil {
+		t.Errorf("expected directory to persist after cleanup, got: %v", err)
+	}
+}
+
+func TestDownloadTo_ExistingDirectory(t *testing.T) {
+	ctx := context.Background()
+
+	destDir := t.TempDir()
+
+	// Write a marker file to prove the directory is not re-downloaded.
+	marker := filepath.Join(destDir, "marker.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	cloner := analyzer.NewCloner("", "")
+
+	dir, cleanup, err := cloner.DownloadTo(ctx, "https://fake.invalid/repo.tar.gz", destDir)
+	if err != nil {
+		t.Fatalf("DownloadTo failed: %v", err)
+	}
+
+	if dir != destDir {
+		t.Fatalf("expected dir %q, got %q", destDir, dir)
+	}
+
+	// Marker file must still exist (no re-download happened).
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("marker file missing after DownloadTo: %v", err)
+	}
+	if string(data) != "keep" {
+		t.Fatalf("marker file contents changed: %q", data)
+	}
+
+	// Cleanup is a no-op.
+	cleanup()
+
+	if _, err := os.Stat(destDir); err != nil {
+		t.Errorf("expected directory to persist after cleanup, got: %v", err)
+	}
+}

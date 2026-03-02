@@ -17,6 +17,9 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
+// noop is a cleanup function that does nothing, used for durable clones.
+var noop = func() {}
+
 // Cloner performs shallow git clones into temporary directories.
 type Cloner struct {
 	token    string
@@ -70,6 +73,46 @@ func (c *Cloner) Clone(ctx context.Context, cloneURL string) (dir string, cleanu
 	}
 
 	return tmpDir, cleanupFn, nil
+}
+
+// CloneTo shallow-clones the repository at cloneURL into destDir. If destDir
+// already exists and contains entries the clone is skipped. The returned
+// cleanup function is always a no-op because the directory is meant to be
+// durable (persist across runs).
+func (c *Cloner) CloneTo(ctx context.Context, cloneURL, destDir string) (string, func(), error) {
+	// If destDir already exists and has entries, skip cloning.
+	if entries, err := os.ReadDir(destDir); err == nil && len(entries) > 0 {
+		return destDir, noop, nil
+	}
+
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("create dest dir: %w", err)
+	}
+
+	opts := &git.CloneOptions{
+		URL:          cloneURL,
+		Depth:        1,
+		SingleBranch: true,
+		Tags:         git.NoTags,
+	}
+
+	if c.token != "" {
+		username := c.username
+		if username == "" {
+			username = "x-token-auth"
+		}
+		opts.Auth = &githttp.BasicAuth{
+			Username: username,
+			Password: c.token,
+		}
+	}
+
+	_, err := git.PlainCloneContext(ctx, destDir, false, opts)
+	if err != nil {
+		return "", nil, fmt.Errorf("git clone: %w", err)
+	}
+
+	return destDir, noop, nil
 }
 
 // CloneFull clones the repository at cloneURL with full history into a
@@ -169,6 +212,45 @@ func (c *Cloner) Download(ctx context.Context, downloadURL string) (dir string, 
 	}
 
 	return tmpDir, cleanupFn, nil
+}
+
+// DownloadTo fetches a tarball from downloadURL and extracts it to destDir.
+// If destDir already exists and contains entries the download is skipped.
+// The returned cleanup function is always a no-op because the directory is
+// meant to be durable (persist across runs).
+func (c *Cloner) DownloadTo(ctx context.Context, downloadURL, destDir string) (string, func(), error) {
+	// If destDir already exists and has entries, skip downloading.
+	if entries, err := os.ReadDir(destDir); err == nil && len(entries) > 0 {
+		return destDir, noop, nil
+	}
+
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("create dest dir: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	if c.token != "" && c.username != "" {
+		req.SetBasicAuth(c.username, c.token)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("download tarball: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("download tarball: HTTP %d", resp.StatusCode)
+	}
+
+	if err := extractTarGz(resp.Body, destDir); err != nil {
+		return "", nil, fmt.Errorf("extract tarball: %w", err)
+	}
+
+	return destDir, noop, nil
 }
 
 // extractTarGz decompresses a gzipped tar archive from r into destDir.

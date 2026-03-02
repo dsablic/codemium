@@ -274,6 +274,7 @@ func newAnalyzeCmd() *cobra.Command {
 	cmd.Flags().Bool("churn", false, "Analyze code churn and hotspots")
 	cmd.Flags().Int("churn-limit", 500, "Max commits to scan per repo for churn analysis (0 = unlimited)")
 	cmd.Flags().Float64("rate-limit", 0, "Max API requests per second (0 = unlimited)")
+	cmd.Flags().String("clone", "", "Persist cloned repos to directory (reuses existing clones)")
 
 	cmd.MarkFlagRequired("provider")
 
@@ -297,6 +298,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	concurrency, _ := cmd.Flags().GetInt("concurrency")
 	outputPath, _ := cmd.Flags().GetString("output")
 	rateLimit, _ := cmd.Flags().GetFloat64("rate-limit")
+	cloneDir, _ := cmd.Flags().GetString("clone")
 
 	// Create rate-limited HTTP client
 	httpClient := &http.Client{Transport: &provider.RateLimitTransport{ReqPerSec: rateLimit}}
@@ -423,10 +425,20 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		var dir string
 		var cleanup func()
 		var err error
-		if repo.DownloadURL != "" {
-			dir, cleanup, err = cloner.Download(ctx, repo.DownloadURL)
+
+		if cloneDir != "" {
+			destDir := filepath.Join(cloneDir, repo.Slug)
+			if repo.DownloadURL != "" {
+				dir, cleanup, err = cloner.DownloadTo(ctx, repo.DownloadURL, destDir)
+			} else {
+				dir, cleanup, err = cloner.CloneTo(ctx, repo.CloneURL, destDir)
+			}
 		} else {
-			dir, cleanup, err = cloner.Clone(ctx, repo.CloneURL)
+			if repo.DownloadURL != "" {
+				dir, cleanup, err = cloner.Download(ctx, repo.DownloadURL)
+			} else {
+				dir, cleanup, err = cloner.Clone(ctx, repo.CloneURL)
+			}
 		}
 		if err != nil {
 			return nil, err

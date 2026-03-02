@@ -52,6 +52,7 @@ type RepoStats struct {
 	AIEstimate    *AIEstimate        `json:"ai_estimate,omitempty"`
 	Health        *RepoHealth        `json:"health,omitempty"`
 	HealthDetails *RepoHealthDetails `json:"health_details,omitempty"`
+	Secrets       *SecretsReport     `json:"secrets,omitempty"`
 }
 
 // RepoError records a repository that failed to process.
@@ -156,6 +157,18 @@ type HealthSummary struct {
 	Failed     HealthCategorySummary `json:"failed"`
 }
 
+// SecretsReport holds secret scanning results for a single repository.
+type SecretsReport struct {
+	FindingsCount    int      `json:"findings_count"`
+	FilesWithSecrets []string `json:"files_with_secrets,omitempty"`
+}
+
+// SecretsAggregate holds aggregate secret scanning data across all repos.
+type SecretsAggregate struct {
+	TotalFindings    int `json:"total_findings"`
+	ReposWithSecrets int `json:"repos_with_secrets"`
+}
+
 // Filters records what filters were applied to the analysis.
 type Filters struct {
 	Projects []string `json:"projects,omitempty"`
@@ -198,5 +211,6 @@ type Report struct {
 	ByLanguage    []LanguageStats `json:"by_language"`
 	Errors        []RepoError     `json:"errors,omitempty"`
 	AIEstimate    *AIEstimate     `json:"ai_estimate,omitempty"`
-	HealthSummary *HealthSummary  `json:"health_summary,omitempty"`
+	HealthSummary  *HealthSummary    `json:"health_summary,omitempty"`
+	SecretsSummary *SecretsAggregate `json:"secrets_summary,omitempty"`
 }

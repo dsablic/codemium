@@ -295,6 +295,8 @@ When API errors occur during health classification, AI estimation, or detailed a
 --health-commit-limit 500   # Max commits for health details (default: 500)
 --churn                     # Enable code churn and hotspot analysis
 --churn-limit 500           # Max commits to scan per repo for churn (default: 500)
+--clone ./repos                 # Persist cloned repos to directory (reuses existing clones)
+--secrets                       # Scan repos for secrets (API keys, tokens, passwords)
 ```
 
 ## Output Format

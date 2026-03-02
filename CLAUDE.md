@@ -49,6 +49,8 @@ internal/
     detect.go           AI signal detection (co-author, message patterns, bot authors)
   aiestimate/
     estimate.go         AI estimation orchestrator (per-repo commit scanning)
+  secrets/
+    secrets.go          Gitleaks-based secret scanning per repo
   health/
     health.go           Health classification (Classify, ClassifyFromCommits)
     details.go          Deep health analysis (authors, churn, velocity per window)
@@ -66,6 +68,7 @@ internal/
 - **go-license-detector** (`github.com/go-enry/go-license-detector/v4`) - SPDX license detection per directory
 - **Cobra** (`github.com/spf13/cobra`) - CLI framework
 - **Bubbletea/Bubbles/Lipgloss** - Terminal UI for progress display
+- **gitleaks** (`github.com/zricethezav/gitleaks/v8`) - Secret scanning for API keys, tokens, passwords
 
 ## Architecture Notes
 
@@ -82,6 +85,8 @@ internal/
 - **Vendor/generated filtering**: Always-on filtering using `go-enry` to skip vendor, generated, and binary files during analysis. `FilteredFiles` count is tracked per repo and in report totals.
 - **License detection**: After analysis, `license.Detect` scans the cloned repo directory for SPDX license identifiers (e.g., "MIT", "Apache-2.0"). Results appear in the per-repo License column.
 - **Code churn / hotspots**: Opt-in via `--churn` flag. Uses provider REST APIs to fetch per-file change data (`--churn-limit N` sets max commits, default 500). `churn.Analyze` collects per-file change frequencies; `churn.ComputeHotspots` ranks files by churn x complexity. Top 20 hotspots shown per repo.
+- **Durable clone**: When `--clone <dir>` is set, repos are cloned to `<dir>/<repo-slug>/` with a no-op cleanup function. Existing directories are reused without re-cloning (cache behavior). Works with both `Clone()` and `Download()` paths.
+- **Secret scanning**: When `--secrets` is used, each repo is scanned for secrets (API keys, tokens, passwords) using gitleaks v8 as a Go library. Runs during the main analysis phase on the cloned directory. Results include finding count and list of files with secrets (no actual secret values). Aggregate summary added to report.
 
 ## Conventions
 

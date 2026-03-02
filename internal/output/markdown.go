@@ -86,6 +86,24 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 		fmt.Fprintln(w)
 	}
 
+	// SBOM Summary (only if present)
+	if report.SBOMSummary != nil {
+		fmt.Fprintf(w, "## Dependencies (SBOM)\n\n")
+		fmt.Fprintf(w, "| Metric | Value |\n")
+		fmt.Fprintf(w, "|--------|-------|\n")
+		fmt.Fprintf(w, "| Total Dependencies | %d |\n", report.SBOMSummary.TotalDeps)
+		fmt.Fprintf(w, "| Repos with Dependencies | %d |\n", report.SBOMSummary.ReposWithDeps)
+		fmt.Fprintln(w)
+		if len(report.SBOMSummary.Ecosystems) > 0 {
+			fmt.Fprintf(w, "| Ecosystem | Dependencies |\n")
+			fmt.Fprintf(w, "|-----------|-------------:|\n")
+			for _, eco := range report.SBOMSummary.Ecosystems {
+				fmt.Fprintf(w, "| %s | %d |\n", eco.Ecosystem, eco.Count)
+			}
+			fmt.Fprintln(w)
+		}
+	}
+
 	// By language
 	fmt.Fprintf(w, "## Languages\n\n")
 	fmt.Fprintf(w, "| Language | Files | Code | Comments | Blanks | Complexity |\n")
@@ -100,6 +118,7 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 	hasAI := report.AIEstimate != nil
 	hasHealth := report.HealthSummary != nil
 	hasSecrets := report.SecretsSummary != nil
+	hasSBOM := report.SBOMSummary != nil
 	fmt.Fprintf(w, "## Repositories\n\n")
 
 	// Build header based on which optional columns are present
@@ -116,6 +135,10 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 	if hasSecrets {
 		header += " | Secrets"
 		separator += "|--------:"
+	}
+	if hasSBOM {
+		header += " | Deps"
+		separator += "|-----:"
 	}
 	fmt.Fprintf(w, "%s |\n%s|\n", header, separator)
 
@@ -156,6 +179,13 @@ func WriteMarkdown(w io.Writer, report model.Report) error {
 				secretsStr = fmt.Sprintf("%d", repo.Secrets.FindingsCount)
 			}
 			fmt.Fprintf(w, " | %s", secretsStr)
+		}
+		if hasSBOM {
+			depsStr := "0"
+			if repo.SBOM != nil && repo.SBOM.TotalDeps > 0 {
+				depsStr = fmt.Sprintf("%d", repo.SBOM.TotalDeps)
+			}
+			fmt.Fprintf(w, " | %s", depsStr)
 		}
 		fmt.Fprintln(w, " |")
 	}

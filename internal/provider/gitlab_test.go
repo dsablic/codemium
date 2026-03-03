@@ -262,6 +262,87 @@ func TestGitLabCommitStats(t *testing.T) {
 	}
 }
 
+func TestGitLabTokenRefreshOn401(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		auth := r.Header.Get("Authorization")
+		if auth == "Bearer expired-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if auth == "Bearer fresh-token" {
+			json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"id": 1, "path": "repo-1", "path_with_namespace": "g/repo-1",
+					"name": "Repo 1", "web_url": "h", "http_url_to_repo": "c",
+					"default_branch": "main", "archived": false,
+					"forked_from_project": nil,
+					"namespace":           map[string]any{"full_path": "g"},
+				},
+			})
+			return
+		}
+		t.Errorf("unexpected auth header: %s", auth)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	refreshCalls := 0
+	refreshFn := func() (string, bool) {
+		refreshCalls++
+		return "fresh-token", true
+	}
+
+	gl := provider.NewGitLabWithRefresh("expired-token", server.URL, nil, refreshFn)
+	repos, err := gl.ListRepos(context.Background(), provider.ListOpts{Organization: "g"})
+	if err != nil {
+		t.Fatalf("expected successful retry, got error: %v", err)
+	}
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(repos))
+	}
+	if refreshCalls != 1 {
+		t.Errorf("expected 1 refresh call, got %d", refreshCalls)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 server calls (401 + retry), got %d", calls)
+	}
+}
+
+func TestGitLabTokenRefreshNotCalledWithoutCallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	gl := provider.NewGitLab("expired-token", server.URL, nil)
+	_, err := gl.ListRepos(context.Background(), provider.ListOpts{Organization: "g"})
+	if err == nil {
+		t.Fatal("expected error on 401 without refresh callback")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected 401 in error, got: %v", err)
+	}
+}
+
+func TestGitLabTokenRefreshFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	refreshFn := func() (string, bool) {
+		return "", false
+	}
+
+	gl := provider.NewGitLabWithRefresh("expired-token", server.URL, nil, refreshFn)
+	_, err := gl.ListRepos(context.Background(), provider.ListOpts{Organization: "g"})
+	if err == nil {
+		t.Fatal("expected error when refresh fails")
+	}
+}
+
 func TestGitLabListCommitsLimit(t *testing.T) {
 	page := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

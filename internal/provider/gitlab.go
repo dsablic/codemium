@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dsablic/codemium/internal/model"
@@ -17,9 +18,11 @@ const gitlabAPIBase = "https://gitlab.com"
 
 // GitLab implements Provider and CommitLister for GitLab.
 type GitLab struct {
-	token   string
-	baseURL string
-	client  *http.Client
+	token        string
+	baseURL      string
+	client       *http.Client
+	tokenRefresh func() (string, bool)
+	mu           sync.Mutex
 }
 
 // NewGitLab creates a new GitLab provider. If baseURL is empty,
@@ -36,6 +39,14 @@ func NewGitLab(token string, baseURL string, client *http.Client) *GitLab {
 		baseURL: baseURL,
 		client:  client,
 	}
+}
+
+// NewGitLabWithRefresh creates a GitLab provider with a token refresh callback.
+// The refreshFn is called on 401 responses to obtain a fresh token (e.g. via glab CLI).
+func NewGitLabWithRefresh(token string, baseURL string, client *http.Client, refreshFn func() (string, bool)) *GitLab {
+	g := NewGitLab(token, baseURL, client)
+	g.tokenRefresh = refreshFn
+	return g
 }
 
 type gitlabProject struct {
@@ -96,12 +107,38 @@ func (g *GitLab) ListRepos(ctx context.Context, opts ListOpts) ([]model.Repo, er
 }
 
 func (g *GitLab) doGet(ctx context.Context, reqURL string) (*http.Response, error) {
+	g.mu.Lock()
+	token := g.token
+	g.mu.Unlock()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+g.token)
-	return g.client.Do(req)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized && g.tokenRefresh != nil {
+		resp.Body.Close()
+		if newToken, ok := g.tokenRefresh(); ok && newToken != token {
+			g.mu.Lock()
+			g.token = newToken
+			g.mu.Unlock()
+
+			req2, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+			if err != nil {
+				return nil, err
+			}
+			req2.Header.Set("Authorization", "Bearer "+newToken)
+			return g.client.Do(req2)
+		}
+	}
+
+	return resp, nil
 }
 
 func (g *GitLab) fetchPage(ctx context.Context, pageURL string) ([]model.Repo, string, error) {

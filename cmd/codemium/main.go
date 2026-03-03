@@ -349,7 +349,14 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--group is required for gitlab")
 		}
 		baseURL := os.Getenv("CODEMIUM_GITLAB_URL")
-		prov = provider.NewGitLab(cred.AccessToken, baseURL, httpClient)
+		// Enable token refresh when token was sourced from glab CLI
+		var refreshFn func() (string, bool)
+		if os.Getenv("CODEMIUM_GITLAB_TOKEN") == "" {
+			if _, err := store.Load("gitlab"); err != nil {
+				refreshFn = auth.GlabCLIToken
+			}
+		}
+		prov = provider.NewGitLabWithRefresh(cred.AccessToken, baseURL, httpClient, refreshFn)
 	default:
 		return fmt.Errorf("unsupported provider: %s", providerName)
 	}
@@ -1093,7 +1100,13 @@ func runTrends(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--group is required for gitlab")
 		}
 		baseURL := os.Getenv("CODEMIUM_GITLAB_URL")
-		prov = provider.NewGitLab(cred.AccessToken, baseURL, httpClient)
+		var refreshFn func() (string, bool)
+		if os.Getenv("CODEMIUM_GITLAB_TOKEN") == "" {
+			if _, err := store.Load("gitlab"); err != nil {
+				refreshFn = auth.GlabCLIToken
+			}
+		}
+		prov = provider.NewGitLabWithRefresh(cred.AccessToken, baseURL, httpClient, refreshFn)
 	default:
 		return fmt.Errorf("unsupported provider: %s", providerName)
 	}

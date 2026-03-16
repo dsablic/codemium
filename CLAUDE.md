@@ -112,3 +112,22 @@ git push origin v0.2.0
 This triggers `.github/workflows/release.yml` which builds binaries for Linux/macOS (amd64, arm64) and Windows (amd64).
 
 Version info injected via ldflags: `main.version`, `main.commit`, `main.date`.
+
+### Versioning Guidelines
+
+Use semantic versioning (MAJOR.MINOR.PATCH):
+
+- **PATCH** (v0.x.Y): Small changes, bug fixes, minor enhancements
+  - Bug fixes in analysis or output
+  - Minor UI tweaks
+  - Dependency updates (patch/minor)
+- **MINOR** (v0.X.0): New features, significant functionality
+  - New CLI flags (e.g., `--sbom`, `--secrets`)
+  - New provider support
+  - New output formats or report sections
+  - Major dependency upgrades (e.g., Charm v1 → v2)
+- **MAJOR** (vX.0.0): Breaking changes
+  - Changed CLI flag names or behavior
+  - Changed output format in incompatible ways
+  - Removed features or flags
+  - Config/credentials format changes

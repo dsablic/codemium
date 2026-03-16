@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/progress"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/progress"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -67,13 +67,14 @@ var (
 
 // NewTUIModel creates a new bubbletea model for the progress TUI.
 func NewTUIModel(total int) model {
+	p := progress.New(
+		progress.WithDefaultBlend(),
+		progress.WithWidth(50),
+		progress.WithoutPercentage(),
+	)
 	return model{
-		progress: progress.New(
-			progress.WithDefaultGradient(),
-			progress.WithWidth(50),
-			progress.WithoutPercentage(),
-		),
-		total: total,
+		progress: p,
+		total:    total,
 	}
 }
 
@@ -83,15 +84,16 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
 	case tea.WindowSizeMsg:
-		m.progress.Width = msg.Width - 10
-		if m.progress.Width > 60 {
-			m.progress.Width = 60
+		w := msg.Width - 10
+		if w > 60 {
+			w = 60
 		}
+		m.progress.SetWidth(w)
 	case ProgressMsg:
 		m.completed = msg.Completed
 		m.total = msg.Total
@@ -103,29 +105,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case progress.FrameMsg:
 		progressModel, cmd := m.progress.Update(msg)
-		m.progress = progressModel.(progress.Model)
+		m.progress = progressModel
 		return m, cmd
 	}
 	return m, nil
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
+	var s string
 	if m.done {
-		return fmt.Sprintf("\n  %s\n\n",
+		s = fmt.Sprintf("\n  %s\n\n",
 			titleStyle.Render(fmt.Sprintf("Done! Analyzed %d repositories.", m.total)))
-	}
+	} else {
+		pad := strings.Repeat(" ", 2)
+		counter := infoStyle.Render(fmt.Sprintf("%d/%d", m.completed, m.total))
+		desc := m.repoName
+		if desc == "" {
+			desc = "Starting..."
+		}
 
-	pad := strings.Repeat(" ", 2)
-	counter := infoStyle.Render(fmt.Sprintf("%d/%d", m.completed, m.total))
-	desc := m.repoName
-	if desc == "" {
-		desc = "Starting..."
+		s = "\n" +
+			pad + titleStyle.Render("Analyzing repositories") + "\n" +
+			pad + m.progress.View() + "  " + counter + "\n" +
+			pad + infoStyle.Render(desc) + "\n\n"
 	}
-
-	return "\n" +
-		pad + titleStyle.Render("Analyzing repositories") + "\n" +
-		pad + m.progress.View() + "  " + counter + "\n" +
-		pad + infoStyle.Render(desc) + "\n\n"
+	return tea.NewView(s)
 }
 
 // RunTUI creates and returns a bubbletea program for the progress TUI.

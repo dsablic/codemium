@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -147,7 +148,7 @@ func (b *Bitbucket) fetchPage(ctx context.Context, pageURL string) ([]model.Repo
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("bitbucket API returned status %d", resp.StatusCode)
+		return nil, "", statusError("bitbucket API", resp)
 	}
 
 	var page bitbucketPage
@@ -159,6 +160,7 @@ func (b *Bitbucket) fetchPage(ctx context.Context, pageURL string) ([]model.Repo
 	for _, raw := range page.Values {
 		var bbRepo bitbucketRepo
 		if err := json.Unmarshal(raw, &bbRepo); err != nil {
+			log.Printf("bitbucket: skipping malformed repo entry: %v", err)
 			continue
 		}
 
@@ -212,12 +214,14 @@ func (b *Bitbucket) ListProjects(ctx context.Context, workspace string) ([]Proje
 		}
 
 		if resp.StatusCode == http.StatusForbidden {
+			err := statusError("bitbucket projects API", resp)
 			resp.Body.Close()
-			return nil, fmt.Errorf("bitbucket projects API returned 403 — add read:project:bitbucket scope to your API token")
+			return nil, err
 		}
 		if resp.StatusCode != http.StatusOK {
+			err := statusError("bitbucket projects API", resp)
 			resp.Body.Close()
-			return nil, fmt.Errorf("bitbucket projects API returned status %d", resp.StatusCode)
+			return nil, err
 		}
 
 		var page struct {
@@ -274,8 +278,9 @@ func (b *Bitbucket) ListCommits(ctx context.Context, repo model.Repo, limit int)
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			err := statusError("bitbucket commits API", resp)
 			resp.Body.Close()
-			return nil, fmt.Errorf("bitbucket commits API returned status %d", resp.StatusCode)
+			return nil, err
 		}
 
 		var page struct {
@@ -289,7 +294,10 @@ func (b *Bitbucket) ListCommits(ctx context.Context, repo model.Repo, limit int)
 		resp.Body.Close()
 
 		for _, c := range page.Values {
-			commitDate, _ := time.Parse(time.RFC3339Nano, c.Date)
+			commitDate, err := time.Parse(time.RFC3339Nano, c.Date)
+			if err != nil {
+				commitDate = time.Time{} // zero time on parse failure
+			}
 			all = append(all, CommitInfo{
 				Hash:    c.Hash,
 				Author:  c.Author.Raw,
@@ -324,36 +332,44 @@ type bitbucketDiffStatEntry struct {
 }
 
 // CommitStats fetches addition/deletion counts for a single Bitbucket commit.
+// Handles pagination for commits that touch many files.
 func (b *Bitbucket) CommitStats(ctx context.Context, repo model.Repo, hash string) (int64, int64, error) {
 	ws, slug := workspaceSlug(repo.URL)
 	if ws == "" {
 		return 0, 0, fmt.Errorf("cannot parse workspace/slug from URL: %s", repo.URL)
 	}
 
-	apiURL := fmt.Sprintf("%s/2.0/repositories/%s/%s/diffstat/%s",
+	var additions, deletions int64
+	nextURL := fmt.Sprintf("%s/2.0/repositories/%s/%s/diffstat/%s",
 		b.baseURL, url.PathEscape(ws), url.PathEscape(slug), url.PathEscape(hash))
 
-	resp, err := b.doGet(ctx, apiURL)
-	if err != nil {
-		return 0, 0, fmt.Errorf("bitbucket diffstat API: %w", err)
-	}
-	defer resp.Body.Close()
+	for nextURL != "" {
+		resp, err := b.doGet(ctx, nextURL)
+		if err != nil {
+			return 0, 0, fmt.Errorf("bitbucket diffstat API: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return 0, 0, fmt.Errorf("bitbucket diffstat API returned status %d", resp.StatusCode)
-	}
+		if resp.StatusCode != http.StatusOK {
+			err := statusError("bitbucket diffstat API", resp)
+			resp.Body.Close()
+			return 0, 0, err
+		}
 
-	var page struct {
-		Values []bitbucketDiffStat `json:"values"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
-		return 0, 0, fmt.Errorf("decode bitbucket diffstat: %w", err)
-	}
+		var page struct {
+			Values []bitbucketDiffStat `json:"values"`
+			Next   string              `json:"next"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+			resp.Body.Close()
+			return 0, 0, fmt.Errorf("decode bitbucket diffstat: %w", err)
+		}
+		resp.Body.Close()
 
-	var additions, deletions int64
-	for _, d := range page.Values {
-		additions += d.LinesAdded
-		deletions += d.LinesRemoved
+		for _, d := range page.Values {
+			additions += d.LinesAdded
+			deletions += d.LinesRemoved
+		}
+		nextURL = page.Next
 	}
 
 	return additions, deletions, nil
@@ -376,8 +392,9 @@ func (b *Bitbucket) CommitFileStats(ctx context.Context, repo model.Repo, hash s
 			return nil, fmt.Errorf("bitbucket diffstat API: %w", err)
 		}
 		if resp.StatusCode != http.StatusOK {
+			err := statusError("bitbucket diffstat API", resp)
 			resp.Body.Close()
-			return nil, fmt.Errorf("bitbucket diffstat API returned status %d", resp.StatusCode)
+			return nil, err
 		}
 
 		var page struct {

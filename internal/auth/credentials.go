@@ -43,7 +43,12 @@ func DefaultStorePath() string {
 }
 
 func (s *FileStore) Save(provider string, cred Credentials) error {
-	all, _ := s.loadAll()
+	all, err := s.loadAll()
+	if err != nil && !os.IsNotExist(err) {
+		// File exists but is corrupted; back up and start fresh to avoid
+		// silently dropping other providers' credentials.
+		_ = os.Rename(s.path, s.path+".bak")
+	}
 	if all == nil {
 		all = make(map[string]Credentials)
 	}

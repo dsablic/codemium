@@ -82,12 +82,13 @@ func (g *GitHub) ListRepos(ctx context.Context, opts ListOpts) ([]model.Repo, er
 }
 
 type githubRepo struct {
-	Name     string `json:"name"`
-	FullName string `json:"full_name"`
-	HTMLURL  string `json:"html_url"`
-	CloneURL string `json:"clone_url"`
-	Archived bool   `json:"archived"`
-	Fork     bool   `json:"fork"`
+	Name          string `json:"name"`
+	FullName      string `json:"full_name"`
+	HTMLURL       string `json:"html_url"`
+	CloneURL      string `json:"clone_url"`
+	DefaultBranch string `json:"default_branch"`
+	Archived      bool   `json:"archived"`
+	Fork          bool   `json:"fork"`
 }
 
 func (g *GitHub) fetchPage(ctx context.Context, pageURL string) ([]model.Repo, string, error) {
@@ -106,7 +107,7 @@ func (g *GitHub) fetchPage(ctx context.Context, pageURL string) ([]model.Repo, s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("github API returned status %d", resp.StatusCode)
+		return nil, "", statusError("github API", resp)
 	}
 
 	var ghRepos []githubRepo
@@ -117,13 +118,14 @@ func (g *GitHub) fetchPage(ctx context.Context, pageURL string) ([]model.Repo, s
 	var repos []model.Repo
 	for _, r := range ghRepos {
 		repos = append(repos, model.Repo{
-			Name:     r.Name,
-			Slug:     r.Name,
-			URL:      r.HTMLURL,
-			CloneURL: r.CloneURL,
-			Provider: "github",
-			Archived: r.Archived,
-			Fork:     r.Fork,
+			Name:          r.Name,
+			Slug:          r.Name,
+			URL:           r.HTMLURL,
+			CloneURL:      r.CloneURL,
+			Provider:      "github",
+			DefaultBranch: r.DefaultBranch,
+			Archived:      r.Archived,
+			Fork:          r.Fork,
 		})
 	}
 
@@ -197,6 +199,12 @@ func (g *GitHub) ListCommits(ctx context.Context, repo model.Repo, limit int) ([
 			return nil, fmt.Errorf("github commits API: %w", err)
 		}
 
+		if resp.StatusCode != http.StatusOK {
+			err := statusError("github commits API", resp)
+			resp.Body.Close()
+			return nil, err
+		}
+
 		var commits []githubCommit
 		if err := json.NewDecoder(resp.Body).Decode(&commits); err != nil {
 			resp.Body.Close()
@@ -205,7 +213,10 @@ func (g *GitHub) ListCommits(ctx context.Context, repo model.Repo, limit int) ([
 		resp.Body.Close()
 
 		for _, c := range commits {
-			commitDate, _ := time.Parse(time.RFC3339, c.Commit.Author.Date)
+			commitDate, err := time.Parse(time.RFC3339, c.Commit.Author.Date)
+			if err != nil {
+				commitDate = time.Time{} // zero time on parse failure
+			}
 			all = append(all, CommitInfo{
 				Hash:    c.SHA,
 				Author:  fmt.Sprintf("%s <%s>", c.Commit.Author.Name, c.Commit.Author.Email),
@@ -245,7 +256,7 @@ func (g *GitHub) CommitStats(ctx context.Context, repo model.Repo, hash string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, 0, fmt.Errorf("github commit detail API returned status %d", resp.StatusCode)
+		return 0, 0, statusError("github commit detail API", resp)
 	}
 
 	var detail githubCommitDetail
@@ -278,7 +289,7 @@ func (g *GitHub) CommitFileStats(ctx context.Context, repo model.Repo, hash stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github commit detail API returned status %d", resp.StatusCode)
+		return nil, statusError("github commit detail API", resp)
 	}
 
 	var detail struct {

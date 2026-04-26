@@ -3,6 +3,10 @@ package provider
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/dsablic/codemium/internal/model"
@@ -51,4 +55,16 @@ type FileChange struct {
 type ChurnLister interface {
 	CommitLister
 	CommitFileStats(ctx context.Context, repo model.Repo, hash string) ([]FileChange, error)
+}
+
+// statusError creates a descriptive error from a non-OK HTTP response,
+// including up to 512 bytes of the response body for debugging.
+func statusError(prefix string, resp *http.Response) error {
+	snippet := make([]byte, 512)
+	n, _ := io.ReadFull(resp.Body, snippet)
+	body := strings.TrimSpace(string(snippet[:n]))
+	if body != "" {
+		return fmt.Errorf("%s returned status %d: %s", prefix, resp.StatusCode, body)
+	}
+	return fmt.Errorf("%s returned status %d", prefix, resp.StatusCode)
 }

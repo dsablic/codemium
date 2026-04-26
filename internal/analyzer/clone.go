@@ -253,6 +253,10 @@ func (c *Cloner) DownloadTo(ctx context.Context, downloadURL, destDir string) (s
 	return destDir, noop, nil
 }
 
+// maxFileSize is the maximum allowed size for a single file extracted from a
+// tarball (256 MB). This prevents decompression bombs from consuming all memory.
+const maxFileSize = 256 << 20
+
 // extractTarGz decompresses a gzipped tar archive from r into destDir.
 // Bitbucket tarballs have a top-level prefix directory; files are extracted
 // directly into destDir with that prefix stripped.
@@ -299,12 +303,15 @@ func extractTarGz(r io.Reader, destDir string) error {
 		case tar.TypeDir:
 			os.MkdirAll(target, 0o755)
 		case tar.TypeReg:
+			if hdr.Size > maxFileSize {
+				continue // skip files that exceed the size limit
+			}
 			os.MkdirAll(filepath.Dir(target), 0o755)
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode)&0o755)
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(f, tr); err != nil {
+			if _, err := io.Copy(f, io.LimitReader(tr, maxFileSize)); err != nil {
 				f.Close()
 				return err
 			}

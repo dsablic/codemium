@@ -67,6 +67,51 @@ func main() {
 	}
 }
 
+// tuiPhase manages the lifecycle of a TUI progress bar for a worker phase.
+// It creates the progress bar, provides a progress callback, and tears down
+// the TUI after the phase completes. The fallbackVerb is used for plain-text
+// progress (e.g., "Analyzed", "Scanned", "Health").
+type tuiPhase struct {
+	program      *tea.Program
+	useTUI       bool
+	fallbackVerb string
+}
+
+func newTUIPhase(total int, fallbackVerb string) *tuiPhase {
+	p := &tuiPhase{
+		useTUI:       ui.IsTTY(),
+		fallbackVerb: fallbackVerb,
+	}
+	if p.useTUI {
+		p.program = ui.RunTUI(total)
+		go func() { p.program.Run() }()
+	}
+	return p
+}
+
+func (p *tuiPhase) progressFn() worker.ProgressFunc {
+	return func(completed, total int, repo model.Repo) {
+		if p.useTUI && p.program != nil {
+			p.program.Send(ui.ProgressMsg{
+				Completed: completed,
+				Total:     total,
+				RepoName:  repo.Slug,
+			})
+		} else {
+			fmt.Fprintf(os.Stderr, "[%d/%d] %s %s\n", completed, total, p.fallbackVerb, repo.Slug)
+		}
+	}
+}
+
+func (p *tuiPhase) done() {
+	if p.useTUI && p.program != nil {
+		p.program.Send(ui.DoneMsg{})
+		time.Sleep(100 * time.Millisecond)
+		p.program.Quit()
+		p.program = nil
+	}
+}
+
 func newAuthCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -307,7 +352,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	sbomFlag, _ := cmd.Flags().GetBool("sbom")
 
 	// Create rate-limited HTTP client
-	httpClient := &http.Client{Transport: &provider.RateLimitTransport{ReqPerSec: rateLimit}}
+	rlTransport := &provider.RateLimitTransport{ReqPerSec: rateLimit}
+	defer rlTransport.Close()
+	httpClient := &http.Client{Transport: rlTransport}
 
 	// Load credentials
 	store := auth.NewFileStore(auth.DefaultStorePath())
@@ -409,30 +456,11 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Found %d repositories\n", len(repoList))
 
 	// Set up progress
-	useTUI := ui.IsTTY()
-	var program *tea.Program
-	if useTUI {
-		program = ui.RunTUI(len(repoList))
-		go func() {
-			program.Run()
-		}()
-	}
+	phase := newTUIPhase(len(repoList), "Analyzed")
 
 	// Process repos
 	cloner := analyzer.NewCloner(cred.AccessToken, cred.Username)
 	codeAnalyzer := analyzer.New()
-
-	progressFn := func(completed, total int, repo model.Repo) {
-		if useTUI && program != nil {
-			program.Send(ui.ProgressMsg{
-				Completed: completed,
-				Total:     total,
-				RepoName:  repo.Slug,
-			})
-		} else {
-			fmt.Fprintf(os.Stderr, "[%d/%d] Analyzed %s\n", completed, total, repo.Slug)
-		}
-	}
 
 	results := worker.RunWithProgress(ctx, repoList, concurrency, func(ctx context.Context, repo model.Repo) (*model.RepoStats, error) {
 		var dir string
@@ -479,15 +507,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 		stats.Provider = repo.Provider
 		stats.URL = repo.URL
 		return stats, nil
-	}, progressFn)
+	}, phase.progressFn())
 
-	if useTUI && program != nil {
-		program.Send(ui.DoneMsg{})
-		// Give TUI a moment to render the done message
-		time.Sleep(100 * time.Millisecond)
-		program.Quit()
-		program = nil
-	}
+	phase.done()
 
 	// Diagnostic error collection (written to error.log if non-empty)
 	var diagErrors []errorEntry
@@ -505,22 +527,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 
 		fmt.Fprintln(os.Stderr, "Estimating AI contribution...")
 
-		if useTUI {
-			program = ui.RunTUI(len(repoList))
-			go func() { program.Run() }()
-		}
-
-		aiProgressFn := func(completed, total int, repo model.Repo) {
-			if useTUI && program != nil {
-				program.Send(ui.ProgressMsg{
-					Completed: completed,
-					Total:     total,
-					RepoName:  repo.Slug,
-				})
-			} else {
-				fmt.Fprintf(os.Stderr, "[%d/%d] Scanned %s\n", completed, total, repo.Slug)
-			}
-		}
+		aiPhase := newTUIPhase(len(repoList), "Scanned")
 
 		aiResults := worker.RunWithProgress(ctx, repoList, concurrency, func(ctx context.Context, repo model.Repo) (*model.RepoStats, error) {
 			est, partialErrs, err := aiestimate.Estimate(ctx, commitLister, repo, aiCommitLimit)
@@ -538,14 +545,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 				Repository: repo.Slug,
 				AIEstimate: est,
 			}, nil
-		}, aiProgressFn)
+		}, aiPhase.progressFn())
 
-		if useTUI && program != nil {
-			program.Send(ui.DoneMsg{})
-			time.Sleep(100 * time.Millisecond)
-			program.Quit()
-			program = nil
-		}
+		aiPhase.done()
 
 		// Attach AI estimates to analysis results
 		aiByRepo := make(map[string]*model.AIEstimate)
@@ -585,26 +587,11 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 
 		fmt.Fprintln(os.Stderr, "Classifying repository health...")
 
-		if useTUI {
-			program = ui.RunTUI(len(repoList))
-			go func() { program.Run() }()
-		}
+		healthPhase := newTUIPhase(len(repoList), "Health")
 
 		commitLimit := 1
 		if healthDetailsFlag {
 			commitLimit = healthCommitLimit
-		}
-
-		healthProgressFn := func(completed, total int, repo model.Repo) {
-			if useTUI && program != nil {
-				program.Send(ui.ProgressMsg{
-					Completed: completed,
-					Total:     total,
-					RepoName:  repo.Slug,
-				})
-			} else {
-				fmt.Fprintf(os.Stderr, "[%d/%d] Health %s\n", completed, total, repo.Slug)
-			}
 		}
 
 		now := time.Now().UTC()
@@ -653,14 +640,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 				Health:        h,
 				HealthDetails: details,
 			}, nil
-		}, healthProgressFn)
+		}, healthPhase.progressFn())
 
-		if useTUI && program != nil {
-			program.Send(ui.DoneMsg{})
-			time.Sleep(100 * time.Millisecond)
-			program.Quit()
-			program = nil
-		}
+		healthPhase.done()
 
 		// Attach health data to analysis results
 		healthByRepo := make(map[string]*model.RepoStats)
@@ -692,18 +674,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 
 		fmt.Fprintln(os.Stderr, "Analyzing code churn...")
 
-		if useTUI {
-			program = ui.RunTUI(len(repoList))
-			go func() { program.Run() }()
-		}
-
-		churnProgressFn := func(completed, total int, repo model.Repo) {
-			if useTUI && program != nil {
-				program.Send(ui.ProgressMsg{Completed: completed, Total: total, RepoName: repo.Slug})
-			} else {
-				fmt.Fprintf(os.Stderr, "[%d/%d] Churn %s\n", completed, total, repo.Slug)
-			}
-		}
+		churnPhase := newTUIPhase(len(repoList), "Churn")
 
 		churnResults := worker.RunWithProgress(ctx, repoList, concurrency, func(ctx context.Context, repo model.Repo) (*model.RepoStats, error) {
 			stats, err := churn.Analyze(ctx, churnLister, repo, churnLimit)
@@ -711,14 +682,9 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 				return nil, err
 			}
 			return &model.RepoStats{Repository: repo.Slug, Churn: stats}, nil
-		}, churnProgressFn)
+		}, churnPhase.progressFn())
 
-		if useTUI && program != nil {
-			program.Send(ui.DoneMsg{})
-			time.Sleep(100 * time.Millisecond)
-			program.Quit()
-			program = nil
-		}
+		churnPhase.done()
 
 		churnByRepo := make(map[string]*model.ChurnStats)
 		for _, r := range churnResults {
@@ -1078,7 +1044,9 @@ func runTrends(cmd *cobra.Command, args []string) error {
 		store.Save(providerName, cred)
 	}
 
-	httpClient := &http.Client{Transport: &provider.RateLimitTransport{ReqPerSec: rateLimit}}
+	rlTransport := &provider.RateLimitTransport{ReqPerSec: rateLimit}
+	defer rlTransport.Close()
+	httpClient := &http.Client{Transport: rlTransport}
 
 	var prov provider.Provider
 	switch providerName {
@@ -1152,27 +1120,10 @@ func runTrends(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Found %d repositories, analyzing %d %s periods\n", len(repoList), len(dates), interval)
 
-	useTUI := ui.IsTTY()
-	var program *tea.Program
-	if useTUI {
-		program = ui.RunTUI(len(repoList))
-		go func() { program.Run() }()
-	}
+	trendsPhase := newTUIPhase(len(repoList), "Analyzed")
 
 	cloner := analyzer.NewCloner(cred.AccessToken, cred.Username)
 	codeAnalyzer := analyzer.New()
-
-	progressFn := func(completed, total int, repo model.Repo) {
-		if useTUI && program != nil {
-			program.Send(ui.ProgressMsg{
-				Completed: completed,
-				Total:     total,
-				RepoName:  repo.Slug,
-			})
-		} else {
-			fmt.Fprintf(os.Stderr, "[%d/%d] Analyzed %s\n", completed, total, repo.Slug)
-		}
-	}
 
 	results := worker.RunTrends(ctx, repoList, concurrency, func(ctx context.Context, repo model.Repo) (map[string]*model.RepoStats, error) {
 		gitRepo, dir, cleanup, err := cloner.CloneFull(ctx, repo.CloneURL)
@@ -1210,13 +1161,9 @@ func runTrends(cmd *cobra.Command, args []string) error {
 		}
 
 		return snapshots, nil
-	}, progressFn)
+	}, trendsPhase.progressFn())
 
-	if useTUI && program != nil {
-		program.Send(ui.DoneMsg{})
-		time.Sleep(100 * time.Millisecond)
-		program.Quit()
-	}
+	trendsPhase.done()
 
 	reportOrg := org
 	if user != "" {

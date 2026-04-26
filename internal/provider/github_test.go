@@ -253,3 +253,95 @@ func TestGitHubListCommitsLimit(t *testing.T) {
 		t.Errorf("expected 150 commits (limited), got %d", len(commits))
 	}
 }
+
+func TestGitHubListCommitsNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL, nil)
+	_, err := gh.ListCommits(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  "https://github.com/myorg/repo-1",
+	}, 100)
+	if err == nil {
+		t.Fatal("expected error on 403 response")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should mention status 403, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rate limit") {
+		t.Errorf("error should include response body snippet, got: %v", err)
+	}
+}
+
+func TestGitHubCommitStatsNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL, nil)
+	_, _, err := gh.CommitStats(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  "https://github.com/myorg/repo-1",
+	}, "deadbeef")
+	if err == nil {
+		t.Fatal("expected error on 404 response")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Errorf("error should mention status 404, got: %v", err)
+	}
+}
+
+func TestGitHubListReposNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL, nil)
+	_, err := gh.ListRepos(context.Background(), provider.ListOpts{Organization: "myorg"})
+	if err == nil {
+		t.Fatal("expected error on 500 response")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error should mention status 500, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "internal error") {
+		t.Errorf("error should include body snippet, got: %v", err)
+	}
+}
+
+func TestGitHubDefaultBranch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"name":           "repo-1",
+				"full_name":      "org/repo-1",
+				"html_url":       "https://github.com/org/repo-1",
+				"clone_url":      "https://github.com/org/repo-1.git",
+				"default_branch": "develop",
+				"archived":       false,
+				"fork":           false,
+			},
+		})
+	}))
+	defer server.Close()
+
+	gh := provider.NewGitHub("test-token", server.URL, nil)
+	repos, err := gh.ListRepos(context.Background(), provider.ListOpts{Organization: "org"})
+	if err != nil {
+		t.Fatalf("ListRepos: %v", err)
+	}
+	if len(repos) != 1 {
+		t.Fatalf("expected 1 repo, got %d", len(repos))
+	}
+	if repos[0].DefaultBranch != "develop" {
+		t.Errorf("expected default branch 'develop', got %q", repos[0].DefaultBranch)
+	}
+}

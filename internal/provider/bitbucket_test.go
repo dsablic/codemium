@@ -245,3 +245,107 @@ func TestBitbucketCommitStats(t *testing.T) {
 		t.Errorf("expected 30 deletions, got %d", deletions)
 	}
 }
+
+func TestBitbucketCommitStatsPagination(t *testing.T) {
+	page := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/diffstat/abc123") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		page++
+		if page == 1 {
+			json.NewEncoder(w).Encode(map[string]any{
+				"values": []map[string]any{
+					{"lines_added": 100, "lines_removed": 20},
+				},
+				"next": "http://" + r.Host + "/2.0/repositories/ws/repo/diffstat/abc123?page=2",
+			})
+		} else {
+			json.NewEncoder(w).Encode(map[string]any{
+				"values": []map[string]any{
+					{"lines_added": 50, "lines_removed": 10},
+				},
+			})
+		}
+	}))
+	defer server.Close()
+
+	bb := provider.NewBitbucket("test-token", "", server.URL, nil)
+	additions, deletions, err := bb.CommitStats(context.Background(), model.Repo{
+		Slug: "repo",
+		URL:  "https://bitbucket.org/ws/repo",
+	}, "abc123")
+	if err != nil {
+		t.Fatalf("CommitStats: %v", err)
+	}
+	if additions != 150 {
+		t.Errorf("expected 150 additions (across 2 pages), got %d", additions)
+	}
+	if deletions != 30 {
+		t.Errorf("expected 30 deletions (across 2 pages), got %d", deletions)
+	}
+	if page != 2 {
+		t.Errorf("expected 2 pages fetched, got %d", page)
+	}
+}
+
+func TestBitbucketListReposNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":{"message":"Access denied"}}`))
+	}))
+	defer server.Close()
+
+	bb := provider.NewBitbucket("bad-token", "", server.URL, nil)
+	_, err := bb.ListRepos(context.Background(), provider.ListOpts{Workspace: "ws"})
+	if err == nil {
+		t.Fatal("expected error on 401 response")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error should mention status 401, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Access denied") {
+		t.Errorf("error should include body snippet, got: %v", err)
+	}
+}
+
+func TestBitbucketListCommitsNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"error":{"message":"Forbidden"}}`))
+	}))
+	defer server.Close()
+
+	bb := provider.NewBitbucket("test-token", "", server.URL, nil)
+	_, err := bb.ListCommits(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  "https://bitbucket.org/ws/repo-1",
+	}, 100)
+	if err == nil {
+		t.Fatal("expected error on 403 response")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should mention status 403, got: %v", err)
+	}
+}
+
+func TestBitbucketCommitStatsNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("not found"))
+	}))
+	defer server.Close()
+
+	bb := provider.NewBitbucket("test-token", "", server.URL, nil)
+	_, _, err := bb.CommitStats(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  "https://bitbucket.org/ws/repo-1",
+	}, "deadbeef")
+	if err == nil {
+		t.Fatal("expected error on 404 response")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Errorf("error should mention status 404, got: %v", err)
+	}
+}

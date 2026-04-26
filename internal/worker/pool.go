@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/dsablic/codemium/internal/model"
@@ -46,14 +47,34 @@ func RunWithProgress(ctx context.Context, repos []model.Repo, concurrency int, p
 			break
 		}
 
-		sem <- struct{}{} // acquire
+		// Use select to remain responsive to context cancellation
+		// while waiting for a semaphore slot.
+		select {
+		case sem <- struct{}{}: // acquire
+		case <-ctx.Done():
+			break
+		}
+		if ctx.Err() != nil {
+			break
+		}
+
 		wg.Add(1)
 
 		go func(r model.Repo) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
 
-			stats, err := process(ctx, r)
+			var stats *model.RepoStats
+			var err error
+
+			func() {
+				defer func() {
+					if v := recover(); v != nil {
+						err = fmt.Errorf("panic: %v", v)
+					}
+				}()
+				stats, err = process(ctx, r)
+			}()
 
 			mu.Lock()
 			results = append(results, Result{Repo: r, Stats: stats, Err: err})
@@ -101,14 +122,32 @@ func RunTrends(ctx context.Context, repos []model.Repo, concurrency int, process
 			break
 		}
 
-		sem <- struct{}{}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break
+		}
+		if ctx.Err() != nil {
+			break
+		}
+
 		wg.Add(1)
 
 		go func(r model.Repo) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			snapshots, err := process(ctx, r)
+			var snapshots map[string]*model.RepoStats
+			var err error
+
+			func() {
+				defer func() {
+					if v := recover(); v != nil {
+						err = fmt.Errorf("panic: %v", v)
+					}
+				}()
+				snapshots, err = process(ctx, r)
+			}()
 
 			mu.Lock()
 			results = append(results, TrendsResult{Repo: r, Snapshots: snapshots, Err: err})

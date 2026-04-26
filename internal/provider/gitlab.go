@@ -136,6 +136,9 @@ func (g *GitLab) doGet(ctx context.Context, reqURL string) (*http.Response, erro
 			req2.Header.Set("Authorization", "Bearer "+newToken)
 			return g.client.Do(req2)
 		}
+		// Token refresh failed or returned same token; return a clear error
+		// instead of the response with a closed body.
+		return nil, fmt.Errorf("gitlab API returned 401 and token refresh failed")
 	}
 
 	return resp, nil
@@ -149,7 +152,7 @@ func (g *GitLab) fetchPage(ctx context.Context, pageURL string) ([]model.Repo, s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("gitlab API returned status %d", resp.StatusCode)
+		return nil, "", statusError("gitlab API", resp)
 	}
 
 	var projects []gitlabProject
@@ -213,8 +216,9 @@ func (g *GitLab) ListSubgroups(ctx context.Context, group string) ([]Subgroup, e
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			err := statusError("gitlab subgroups API", resp)
 			resp.Body.Close()
-			return nil, fmt.Errorf("gitlab subgroups API returned status %d", resp.StatusCode)
+			return nil, err
 		}
 
 		var subgroups []struct {
@@ -284,8 +288,9 @@ func (g *GitLab) ListCommits(ctx context.Context, repo model.Repo, limit int) ([
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			err := statusError("gitlab commits API", resp)
 			resp.Body.Close()
-			return nil, fmt.Errorf("gitlab commits API returned status %d", resp.StatusCode)
+			return nil, err
 		}
 
 		var commits []gitlabCommit
@@ -298,7 +303,10 @@ func (g *GitLab) ListCommits(ctx context.Context, repo model.Repo, limit int) ([
 		resp.Body.Close()
 
 		for _, c := range commits {
-			commitDate, _ := time.Parse(time.RFC3339, c.CommittedDate)
+			commitDate, err := time.Parse(time.RFC3339, c.CommittedDate)
+			if err != nil {
+				commitDate = time.Time{} // zero time on parse failure
+			}
 			all = append(all, CommitInfo{
 				Hash:    c.ID,
 				Author:  fmt.Sprintf("%s <%s>", c.AuthorName, c.AuthorEmail),
@@ -350,7 +358,7 @@ func (g *GitLab) CommitStats(ctx context.Context, repo model.Repo, hash string) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, 0, fmt.Errorf("gitlab commit detail API returned status %d", resp.StatusCode)
+		return 0, 0, statusError("gitlab commit detail API", resp)
 	}
 
 	var detail gitlabCommitDetail

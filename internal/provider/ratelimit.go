@@ -17,22 +17,41 @@ type RateLimitTransport struct {
 
 	once    sync.Once
 	limiter chan struct{}
+	done    chan struct{} // closed to stop the ticker goroutine
 }
 
 func (t *RateLimitTransport) init() {
+	t.done = make(chan struct{})
 	if t.ReqPerSec > 0 {
 		t.limiter = make(chan struct{}, 1)
 		interval := time.Duration(float64(time.Second) / t.ReqPerSec)
 		go func() {
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
-			for range ticker.C {
+			for {
 				select {
-				case t.limiter <- struct{}{}:
-				default:
+				case <-ticker.C:
+					select {
+					case t.limiter <- struct{}{}:
+					default:
+					}
+				case <-t.done:
+					return
 				}
 			}
 		}()
+	}
+}
+
+// Close stops the rate limiter's background goroutine.
+// It is safe to call multiple times.
+func (t *RateLimitTransport) Close() {
+	t.once.Do(t.init) // ensure done channel exists
+	select {
+	case <-t.done:
+		// already closed
+	default:
+		close(t.done)
 	}
 }
 

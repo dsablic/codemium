@@ -61,8 +61,14 @@ type deviceCodeResponse struct {
 }
 
 func (g *GitHubOAuth) requestDeviceCode(ctx context.Context) (deviceCodeResponse, error) {
-	body := fmt.Sprintf(`{"client_id":"%s","scope":"repo read:org"}`, g.ClientID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.deviceURL(), strings.NewReader(body))
+	bodyData, err := json.Marshal(map[string]string{
+		"client_id": g.ClientID,
+		"scope":     "repo read:org",
+	})
+	if err != nil {
+		return deviceCodeResponse{}, fmt.Errorf("marshal device code request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.deviceURL(), strings.NewReader(string(bodyData)))
 	if err != nil {
 		return deviceCodeResponse{}, err
 	}
@@ -108,8 +114,15 @@ func (g *GitHubOAuth) pollForToken(ctx context.Context, deviceCode string, inter
 		case <-time.After(interval):
 		}
 
-		body := fmt.Sprintf(`{"client_id":"%s","device_code":"%s","grant_type":"urn:ietf:params:oauth:grant-type:device_code"}`, g.ClientID, deviceCode)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.tokenURL(), strings.NewReader(body))
+		bodyData, err := json.Marshal(map[string]string{
+			"client_id":  g.ClientID,
+			"device_code": deviceCode,
+			"grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+		})
+		if err != nil {
+			return Credentials{}, fmt.Errorf("marshal token request: %w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.tokenURL(), strings.NewReader(string(bodyData)))
 		if err != nil {
 			return Credentials{}, err
 		}
@@ -128,7 +141,10 @@ func (g *GitHubOAuth) pollForToken(ctx context.Context, deviceCode string, inter
 			Error       string `json:"error"`
 			Interval    int    `json:"interval"`
 		}
-		json.NewDecoder(resp.Body).Decode(&result)
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return Credentials{}, fmt.Errorf("decode token response: %w", err)
+		}
 		resp.Body.Close()
 
 		switch result.Error {

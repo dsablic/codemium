@@ -3,6 +3,8 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -39,11 +41,23 @@ func (b *BitbucketOAuth) Login(ctx context.Context) (Credentials, error) {
 	}
 	redirectURI := fmt.Sprintf("http://localhost:%d/callback", callbackPort)
 
+	// Generate a random state parameter for CSRF protection
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return Credentials{}, fmt.Errorf("generate state: %w", err)
+	}
+	state := hex.EncodeToString(stateBytes)
+
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != state {
+			errCh <- fmt.Errorf("state mismatch in OAuth callback (possible CSRF)")
+			fmt.Fprintln(w, "Error: state mismatch.")
+			return
+		}
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			errCh <- fmt.Errorf("no code in callback")
@@ -66,10 +80,11 @@ func (b *BitbucketOAuth) Login(ctx context.Context) (Credentials, error) {
 	}()
 	defer server.Shutdown(ctx)
 
-	authURL := fmt.Sprintf("%s?client_id=%s&response_type=code&redirect_uri=%s",
+	authURL := fmt.Sprintf("%s?client_id=%s&response_type=code&redirect_uri=%s&state=%s",
 		bitbucketAuthorizeURL,
 		url.QueryEscape(b.ClientID),
 		url.QueryEscape(redirectURI),
+		url.QueryEscape(state),
 	)
 	openBrowser(authURL)
 

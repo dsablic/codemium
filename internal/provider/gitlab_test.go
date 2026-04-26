@@ -375,3 +375,66 @@ func TestGitLabListCommitsLimit(t *testing.T) {
 		t.Errorf("expected 150 commits (limited), got %d", len(commits))
 	}
 }
+
+func TestGitLabListReposNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"403 Forbidden"}`))
+	}))
+	defer server.Close()
+
+	gl := provider.NewGitLab("test-token", server.URL, nil)
+	_, err := gl.ListRepos(context.Background(), provider.ListOpts{Organization: "mygroup"})
+	if err == nil {
+		t.Fatal("expected error on 403 response")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should mention status 403, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Forbidden") {
+		t.Errorf("error should include body snippet, got: %v", err)
+	}
+}
+
+func TestGitLabListCommitsNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"404 Project Not Found"}`))
+	}))
+	defer server.Close()
+
+	gl := provider.NewGitLab("test-token", server.URL, nil)
+	_, err := gl.ListCommits(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  server.URL + "/mygroup/repo-1",
+	}, 100)
+	if err == nil {
+		t.Fatal("expected error on 404 response")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Errorf("error should mention status 404, got: %v", err)
+	}
+}
+
+func TestGitLabCommitStatsNon200(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("server error"))
+	}))
+	defer server.Close()
+
+	gl := provider.NewGitLab("test-token", server.URL, nil)
+	_, _, err := gl.CommitStats(context.Background(), model.Repo{
+		Slug: "repo-1",
+		URL:  server.URL + "/mygroup/repo-1",
+	}, "abc123")
+	if err == nil {
+		t.Fatal("expected error on 500 response")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error should mention status 500, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "server error") {
+		t.Errorf("error should include body snippet, got: %v", err)
+	}
+}

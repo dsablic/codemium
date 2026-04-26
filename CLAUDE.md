@@ -76,11 +76,11 @@ internal/
 ## Architecture Notes
 
 - **Provider abstraction**: `provider.Provider` interface allows adding new git hosting providers. Each provider implements `ListRepos(ctx, ListOpts)`.
-- **Worker pool**: Bounded goroutine pool with semaphore pattern. Configurable concurrency via `--concurrency` flag.
-- **Rate limiting**: `RateLimitTransport` in `provider/ratelimit.go` implements `http.RoundTripper` with token-bucket rate limiting and 429 retry (exponential backoff, `Retry-After` header). Injected via `--rate-limit` flag (default: 0 = unlimited, retry-only). All providers accept `*http.Client` to share the transport.
+- **Worker pool**: Bounded goroutine pool with semaphore pattern. Configurable concurrency via `--concurrency` flag. Both `RunWithProgress` and `RunTrends` use `select` on the semaphore and `ctx.Done()` for cancellation responsiveness, and wrap process functions in `recover()` to capture panics as errors instead of crashing.
+- **Rate limiting**: `RateLimitTransport` in `provider/ratelimit.go` implements `http.RoundTripper` with token-bucket rate limiting and 429 retry (exponential backoff, `Retry-After` header). Injected via `--rate-limit` flag (default: 0 = unlimited, retry-only). All providers accept `*http.Client` to share the transport. Call `Close()` to stop the background ticker goroutine.
 - **Partial failure**: Repos that fail to clone or analyze are recorded as errors in the report; the run continues.
 - **Auth**: Credentials stored at `~/.config/codemium/credentials.json` (0600 perms). Resolution order: env vars (`CODEMIUM_<PROVIDER>_TOKEN`) → saved credentials → CLI fallback (`gh auth token` for GitHub, `glab config get token` for GitLab).
-- **Clone strategy**: Shallow clone (depth 1, single branch, no tags) to temp dir, deleted after analysis.
+- **Clone strategy**: Shallow clone (depth 1, single branch, no tags) to temp dir, deleted after analysis. Tarball extraction uses `io.LimitReader` (256 MB per file) to prevent decompression bombs.
 - **scc initialization**: `processor.ProcessConstants()` called via `sync.Once` since scc requires global initialization.
 - **AI estimation**: When `--ai-estimate` is used, a second pass fetches commit history via provider REST APIs. `provider.CommitLister` interface provides `ListCommits` and `CommitStats`. `aidetect.Detect` classifies commits, `aiestimate.Estimate` orchestrates per-repo. Results attach to existing report model as optional fields.
 - **Health classification**: When `--health` is used, repos are classified as Active (<180d), Maintained (180-365d), or Abandoned (>365d) based on last commit date. Repos where commit history cannot be fetched (API errors, permissions) are classified as Failed with the error message stored in `RepoHealth.Error`. `--health-details` adds deep analysis: per-window author counts, code churn, bus factor, and velocity trend. Uses the same `CommitLister` interface.
